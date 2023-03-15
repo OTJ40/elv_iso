@@ -17,9 +17,11 @@ var idle_mode = true
 
 var mouse_pressing = false
 var is_first_time = true
+var has_painted_building = false
+var has_lands_preview = false
 var place_valid = false
 
-const LIMIT = 200
+const LIMIT = 300
 var half_camera_rect = Vector2i()
 var zoom_factor = 1.0
 var buildings_data_array = []
@@ -34,6 +36,19 @@ var sell_cursor
 var move_cursor
 var default_cursor
 
+var even_directions = [
+	Vector2i(2,-5),
+	Vector2i(2,5),
+	Vector2i(-3,5),
+	Vector2i(-3,-5)
+	]
+var odd_directions = [
+	Vector2i(3,-5),
+	Vector2i(3,5),
+	Vector2i(-2,5),
+	Vector2i(-2,-5)
+	]
+
 var ortho = [
 	Vector2i(-2, 4), Vector2i(-1, 2), Vector2i(-2, 3), Vector2i(-1, 4), Vector2i(-2, 5), 
 	Vector2i(-1, 6), Vector2i(0, 0), Vector2i(-1, 1), Vector2i(0, 2), Vector2i(-1, 3), 
@@ -43,54 +58,12 @@ var ortho = [
 	]
 
 
-#var ortho = [
-#	Vector2i(10, 4), Vector2i(11, 2), Vector2i(10, 3), Vector2i(11, 4), Vector2i(10, 5),
-#	Vector2i(11, 6), Vector2i(12, 0), Vector2i(11, 1), Vector2i(12, 2), Vector2i(11, 3), 
-#	Vector2i(12, 4), Vector2i(11, 5), Vector2i(12, 6), Vector2i(11, 7), Vector2i(12, 8), 
-#	Vector2i(12, 1), Vector2i(13, 2), Vector2i(12, 3), Vector2i(13, 4), Vector2i(12, 5), 
-#	Vector2i(13, 6), Vector2i(12, 7), Vector2i(13, 3), Vector2i(14, 4), Vector2i(13, 5), 
-#	Vector2i(12, 9), Vector2i(13, 7), Vector2i(13, 8), Vector2i(13, 9), Vector2i(13, 10), 
-#	Vector2i(13, 11), Vector2i(14, 5), Vector2i(14, 6), Vector2i(14, 7), Vector2i(14, 8), 
-#	Vector2i(14, 9), Vector2i(14, 10), Vector2i(14, 11), Vector2i(14, 12), Vector2i(14, 13), 
-#	Vector2i(15, 6), Vector2i(15, 7), Vector2i(15, 8), Vector2i(15, 9), Vector2i(15, 10), 
-#	Vector2i(15, 11), Vector2i(15, 12), Vector2i(16, 8), Vector2i(16, 9), Vector2i(16, 10)
-#	]
-
 
 func _ready() -> void:
 	$CameraManager.limit_bottom = 4 * LIMIT # 2000
 	$CameraManager.limit_left = -4 * LIMIT # -2000
 	$CameraManager.limit_right = 6 * LIMIT # 3000
 	$CameraManager.limit_top = -3 * LIMIT # -1500
-	
-#	for v in ortho:
-#		print(v)
-#		var d_1 = Vector2i(10,0)
-#		var d_2 = Vector2i(12,5)
-#		var d_3 = Vector2i(7,5)
-#		var d_4 = Vector2i(10,10)
-#		var d_5 = Vector2i(5,10)
-#		var d_6 = Vector2i(7,15)
-#		if v.y % 2 == 1:
-#			d_2.x += 1#Vector2i(13,5)
-#			d_3.x += 1#Vector2i(8,5)
-#			d_6.x += 1#Vector2i(8,15)
-#		$Land.set_cell(0,v + d_1,0,Vector2i(0,0))
-#		$Land.set_cell(0,v + d_2,0,Vector2i(0,0))
-#		$Land.set_cell(0,v + d_3,0,Vector2i(0,0))
-#		$Land.set_cell(0,v + d_4,0,Vector2i(0,0))
-#		$Land.set_cell(0,v + d_5,0,Vector2i(0,0))
-#		$Land.set_cell(0,v + d_6,0,Vector2i(0,0))
-#		await get_tree().create_timer(.1).timeout
-	
-#	var d = Vector2i(-2,6)
-#	var d = Vector2i(3,4)
-#	var d = Vector2i(3,7)
-#	if v.y % 2 == 1:
-#		d = Vector2i(4,7)
-#	var d = Vector2i(-8,9)
-#	if v.y % 2 == 1:
-#		d = Vector2i(-7,9)
 	
 #	load_config()
 #	if is_first_time:
@@ -109,12 +82,24 @@ func _ready() -> void:
 		b.pressed.connect(init_build_mode.bind(b))
 
 func _process(_delta: float) -> void:
-	print(idle_mode,build_mode)
+#	print(idle_mode,build_mode)
 	if build_mode or drag_mode:
 		update_building_preview()
 
 func _unhandled_input(event: InputEvent) -> void:
-	
+	if idle_mode:
+		if event.is_action_released("ui_accept"):
+			var current_cell = $Base.local_to_map(get_global_mouse_position())
+			print(current_cell)
+	if build_mode:
+		if event.is_action_released("ui_accept"):
+			place_building()
+			if build_type != "Road":
+				cancel_build_mode()
+				$Base.modulate = Color(1,1,1,1)
+		if event.is_action_released("ui_cancel"):
+			cancel_build_mode()
+			$Base.modulate = Color(1,1,1,1)
 	# mouse_drag
 #	print($CameraManager.position)
 	if event is InputEventMouseMotion:
@@ -131,7 +116,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				$CameraManager.limit_bottom - half_camera_rect.y
 				)
 			$CameraManager.position -= event.relative * zoom_factor
-#			offset += $CameraManager.position
 	
 #	if idle_mode:
 #	if event is InputEventMouseButton:
@@ -142,9 +126,20 @@ func _unhandled_input(event: InputEvent) -> void:
 #	var current_cell = $Base.local_to_map(get_global_mouse_position())
 #	print(current_cell)
 
+func place_building():
+	pass
+
+func cancel_build_mode():
+	$Cells.visible = false
+	place_valid = false
+	build_mode = false
+	get_node("UI/BuildingPreview").queue_free()
+	$UI/HUD/BuildButtons.visible = true
+	$UI/HUD/DoneButton.visible = true
+
 func init_menu_mode(btn):
 	match btn.name:
-		"BuilderButton":
+		"BuildButton":
 			$UI/HUD/BuildButtons.visible = true
 			$UI/HUD/Menu.visible = false
 			$UI/HUD/DoneButton.visible = true
@@ -173,7 +168,16 @@ func build_main_hall():
 		Vector2i(7, 5),
 		Vector2i(10, 10),
 		Vector2i(5, 10),
-		Vector2i(7, 15)
+		Vector2i(7, 15),
+#		Vector2i(15, -10),
+#		Vector2i(5, 20),
+#		Vector2i(0, 20),
+#		Vector2i(7, -5),
+#		Vector2i(17, -15),
+#		Vector2i(-3, 15),
+#		Vector2i(-3, 5),
+#		Vector2i(12, -5),
+#		Vector2i(2, 25),
 		]
 
 func load_from_buildings_data_file() :
@@ -189,27 +193,71 @@ func update_building_preview():
 	var current_cell = $Base.local_to_map(get_global_mouse_position())
 	var current_cell_in_px = Vector2i($Base.map_to_local(current_cell))
 	$UI.update_building_preview(current_cell_in_px,Vector2i($CameraManager.position),"44ffffff")
-#	prints(current_cell,current_cell_in_px)
+#	prints(current_cell)
 
 func init_build_mode(btn):
 	build_mode = true
 	idle_mode = false
 	build_type = btn.name
+	$Cells.visible = true
 	$UI/HUD/BuildButtons.visible = false
-	$UI.set_building_preview(build_type, get_global_mouse_position())
+	$UI/HUD/DoneButton.visible = false
+	if build_type != "Expansion":
+		$Base.modulate = Color(1,1,1,0.4)
+		$UI.set_building_preview(build_type, get_global_mouse_position())
+	else:
+		show_lands_for_sale()
+		has_lands_preview = true
+		$UI/HUD/DoneButton.visible = true
+		expanse_mode = true
+		build_mode = false
 
 func load_config():
 	var content = file_manager.load_from_file("config")
 	if content == "not_first_time":
 		is_first_time = false
 
+func show_lands_for_sale():
+	$UI.modulate_ui(Color(1,1,1,0.4))
+	print(own_lands_array)
+	for_sale_lands_array.clear()
+	for l in own_lands_array:
+		if absi(l.y%2)==1:
+			for dir in odd_directions:
+				if own_lands_array.has(dir + l):
+					continue
+				else:
+					if !for_sale_lands_array.has(dir + l):
+						print(dir+l)
+						for_sale_lands_array.append(dir + l)
+		else:
+			for dir in even_directions:
+				if own_lands_array.has(dir + l):
+					continue
+				else:
+					if !for_sale_lands_array.has(dir + l):
+						print(dir+l)
+						for_sale_lands_array.append(dir + l)
+
+	print(for_sale_lands_array)
+	for l in for_sale_lands_array:
+		var b = load("res://expansion.tscn").instantiate()
+		b.position = $Land.map_to_local(l)
+		$ExpansionPreviews.add_child(b)
+
+
 func update_map():
 	
 	for v in ortho:
 		for land in own_lands_array:
-			if land.y%2==1:
-				if v.y%2==1:
-					land.x += 1
+			if land.y >= 0:
+				if land.y%2==1:
+					if v.y%2==1:
+						land.x += 1
+			else:
+				if land.y%2==-1:
+					if v.y%2==1:
+						land.x += 1
 			$Land.set_cell(0,v + land,0,Vector2i(0,0))
 
 #		$Land.set_pattern(0,land,$Land.tile_set.get_pattern(0))
@@ -233,4 +281,27 @@ func get_atlas_positions_array_from_dims(dims,base) -> Array:
 
 
 func _on_done_button_pressed() -> void:
-	pass # Replace with function body.
+	if has_lands_preview:
+		for l in get_node("UI/LandPreviews").get_children():
+			l.queue_free()
+	$UI.modulate_ui(Color(1,1,1,1))
+	has_lands_preview = false
+	$Cells.visible = false
+	has_painted_building = false
+	
+	idle_mode = true
+	sell_mode = false
+	move_mode = false
+	build_mode = false
+	drag_mode = false
+	expanse_mode = false
+	
+	DisplayServer.cursor_set_custom_image(default_cursor)
+	$UI/HUD/BuildButtons.visible = false
+	$UI/HUD/Menu.visible = true
+	$UI/HUD/DoneButton.visible = false
+	$UI/HUD/Dialog.visible = false
+	var color_rect_array = $UI/ColoredRectangles.get_children()
+	if color_rect_array.size() > 0:
+		for r in color_rect_array:
+			r.queue_free()
