@@ -27,6 +27,6 @@ func update_building_preview(new_pos, delta,color):
 func modulate_ui(c):
 #	var c = Color(1,1,1,0.4)
 #	get_parent().modulate = c
-	$LandPreviews.modulate = c
-	$ColoredRectangles.modulate = c
+#	$LandPreviews.modulate = c
+#	$ColoredRectangles.modulate = c
 	$"../Base".modulate = c

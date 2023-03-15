@@ -36,6 +36,10 @@ var sell_cursor
 var move_cursor
 var default_cursor
 
+var whitey = preload("res://scenes/white.tscn").instantiate()
+#var exp_to_buy_base = Vector2i()
+#var has_point_in_for_sale = false
+
 var even_directions = [
 	Vector2i(2,-5),
 	Vector2i(2,5),
@@ -49,7 +53,7 @@ var odd_directions = [
 	Vector2i(-2,-5)
 	]
 
-var ortho = [
+var iso_coords_5_5 = [
 	Vector2i(-2, 4), Vector2i(-1, 2), Vector2i(-2, 3), Vector2i(-1, 4), Vector2i(-2, 5), 
 	Vector2i(-1, 6), Vector2i(0, 0), Vector2i(-1, 1), Vector2i(0, 2), Vector2i(-1, 3), 
 	Vector2i(0, 4), Vector2i(-1, 5), Vector2i(0, 6), Vector2i(-1, 7), Vector2i(0, 8), 
@@ -57,14 +61,14 @@ var ortho = [
 	Vector2i(1, 6), Vector2i(0, 7), Vector2i(1, 3), Vector2i(2, 4), Vector2i(1, 5)
 	]
 
-
+signal exper
 
 func _ready() -> void:
 	$CameraManager.limit_bottom = 4 * LIMIT # 2000
 	$CameraManager.limit_left = -4 * LIMIT # -2000
 	$CameraManager.limit_right = 6 * LIMIT # 3000
 	$CameraManager.limit_top = -3 * LIMIT # -1500
-	
+
 #	load_config()
 #	if is_first_time:
 #		build_main_hall()
@@ -72,24 +76,26 @@ func _ready() -> void:
 #		load_from_buildings_data_file()
 	build_main_hall()
 	update_map()
-	default_cursor = load("res://default_cursor_32.png")
-	move_cursor = load("res://move_cursor_32.png")
-	sell_cursor = load("res://sell_cursor_32.png")
+	default_cursor = load("res://assets/ui/default_cursor_32.png")
+	move_cursor = load("res://assets/ui/move_cursor_32.png")
+	sell_cursor = load("res://assets/ui/sell_cursor_32.png")
 	DisplayServer.cursor_set_custom_image(default_cursor)
 	for b in get_tree().get_nodes_in_group("menu_buttons"):
 		b.pressed.connect(init_menu_mode.bind(b))
 	for b in get_tree().get_nodes_in_group("build_buttons"):
 		b.pressed.connect(init_build_mode.bind(b))
+	
 
 func _process(_delta: float) -> void:
-#	print(idle_mode,build_mode)
+#	print(idle_mode,build_mode,expanse_mode,move_mode)
 	if build_mode or drag_mode:
 		update_building_preview()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if idle_mode:
 		if event.is_action_released("ui_accept"):
-			var current_cell = $Base.local_to_map(get_global_mouse_position())
+			var current_cell = get_global_mouse_position()
+#			var current_cell = $Base.local_to_map(get_global_mouse_position())
 			print(current_cell)
 	if build_mode:
 		if event.is_action_released("ui_accept"):
@@ -100,9 +106,49 @@ func _unhandled_input(event: InputEvent) -> void:
 		if event.is_action_released("ui_cancel"):
 			cancel_build_mode()
 			$Base.modulate = Color(1,1,1,1)
-	# mouse_drag
-#	print($CameraManager.position)
+	
+	if move_mode:
+		if !has_lands_preview:
+			show_lands_for_sale()
+			has_lands_preview = true
+		if event.is_action_released("ui_accept"):
+			var current_cell = $Land.local_to_map(get_global_mouse_position())
+			print("w",current_cell)
+			if $Buildings.get_used_cells(0).has(current_cell):
+				print(99999)
+#				for item in buildings_data_array:
+#					for pos in get_atlas_positions_array_from_dims(item["dims"],item["base"]):
+#						if current_cell == pos:
+#							erase_building("Yes",item)
+#							$UI.set_building_preview(item["type"], get_global_mouse_position())
+#							build_type = item["type"]
+#							drag_mode = true
+#
+#			elif has_point_in_for_sale_lands(current_cell):
+#				expanse_mode = true
+	
+	if expanse_mode:
+		pass
+#		if !has_painted_building:
+#			paint_building(exp_to_buy_base,Color(0,0,1,0.2))
+#			GlobalSignal.pick_expansion.disconnect(Callable(self,"_set_base_exp_to_buy"))
+		
+#		if event.is_action_released("ui_accept"):
+#			if !has_painted_building:
+#				var current_tile = $Base.local_to_map(get_global_mouse_position())
+#				prints(current_tile,22)
+#				if has_point_in_for_sale_lands(current_tile):
+#					paint_building(exp_to_buy_base,Color(0,0,1,0.2))
+#					print(9798787987)
+#					var rect_for_sale = get_rect_for_sale(current_tile)
+#					$UI/HUD/Dialog/VBoxContainer/Label.text = "Buy Expansion?"
+#					paint_building(get_atlas_positions_array_from_dims(Vector2i(5,5),rect_for_sale),Color(0,0,1,0.5))
+#					$UI/HUD/Dialog.visible = true
+#					var callable = Callable(self,"buy_expansion")
+#					connect_dialog_buttons({"position": rect_for_sale},callable)
+	
 	if event is InputEventMouseMotion:
+		idle_mode = false
 		mouse_pressing = Input.get_action_strength("ui_accept")
 		if mouse_pressing:
 			$CameraManager.position.x = clamp(
@@ -116,15 +162,20 @@ func _unhandled_input(event: InputEvent) -> void:
 				$CameraManager.limit_bottom - half_camera_rect.y
 				)
 			$CameraManager.position -= event.relative * zoom_factor
+	else:
+		idle_mode = true
 	
 #	if idle_mode:
 #	if event is InputEventMouseButton:
 #		half_camera_rect = get_viewport_rect().size * zoom_factor * 0.5
 #			if event.is_pressed():
-				
-#	print(event)
-#	var current_cell = $Base.local_to_map(get_global_mouse_position())
-#	print(current_cell)
+
+#func has_point_in_for_sale_lands(point: Vector2i) -> bool:
+#
+#	for n in get_tree().get_nodes_in_group("expansions"):
+#		print(n.has)
+	
+
 
 func place_building():
 	pass
@@ -169,15 +220,6 @@ func build_main_hall():
 		Vector2i(10, 10),
 		Vector2i(5, 10),
 		Vector2i(7, 15),
-#		Vector2i(15, -10),
-#		Vector2i(5, 20),
-#		Vector2i(0, 20),
-#		Vector2i(7, -5),
-#		Vector2i(17, -15),
-#		Vector2i(-3, 15),
-#		Vector2i(-3, 5),
-#		Vector2i(12, -5),
-#		Vector2i(2, 25),
 		]
 
 func load_from_buildings_data_file() :
@@ -219,7 +261,7 @@ func load_config():
 
 func show_lands_for_sale():
 	$UI.modulate_ui(Color(1,1,1,0.4))
-	print(own_lands_array)
+#	print(own_lands_array)
 	for_sale_lands_array.clear()
 	for l in own_lands_array:
 		if absi(l.y%2)==1:
@@ -228,7 +270,7 @@ func show_lands_for_sale():
 					continue
 				else:
 					if !for_sale_lands_array.has(dir + l):
-						print(dir+l)
+#						print(dir+l)
 						for_sale_lands_array.append(dir + l)
 		else:
 			for dir in even_directions:
@@ -236,32 +278,82 @@ func show_lands_for_sale():
 					continue
 				else:
 					if !for_sale_lands_array.has(dir + l):
-						print(dir+l)
+#						print(dir+l)
 						for_sale_lands_array.append(dir + l)
 
-	print(for_sale_lands_array)
+#	print(for_sale_lands_array)
+	
 	for l in for_sale_lands_array:
-		var b = load("res://expansion.tscn").instantiate()
+		var b = load("res://scenes/expansion.tscn").instantiate()
 		b.position = $Land.map_to_local(l)
+		b.add_to_group("expansions")
 		$ExpansionPreviews.add_child(b)
+	if !GlobalSignal.pick_expansion.is_connected(Callable(self,"manage_expanse")):
+		GlobalSignal.pick_expansion.connect(Callable(self,"manage_expanse"))
 
+func manage_expanse(pos):
+	if !has_painted_building:
+		var exp_pos = $Base.local_to_map(pos)
+		paint_building(exp_pos,Color(0,0,1,0.2))
+#		GlobalSignal.pick_expansion.disconnect(Callable(self,"manage_expanse"))
+		$UI/HUD/Dialog/VBoxContainer/Label.text = "Buy Expansion?"
+		$UI/HUD/Dialog.visible = true
+		var callable = Callable(self,"buy_expansion")
+		connect_dialog_buttons({"position": exp_pos},callable)
+#		print("wewe",$Base.local_to_map(pos))
+
+func buy_expansion(btn_name,dict):
+	if btn_name == "Yes":
+		own_lands_array.append(dict["position"])
+		for cell in iso_coords_5_5:
+			$Land.set_cell(0,return_processed_iso_coords(dict["position"],cell),0,Vector2i(0,0))
+		file_manager.save_to_file("lands_data", own_lands_array)
+		if has_lands_preview:
+			for l in $ExpansionPreviews.get_children():
+				l.queue_free()
+		show_lands_for_sale()
+		desactivate_dialog_btns()
+	elif btn_name == "No":
+		desactivate_dialog_btns()
+	
+
+func desactivate_dialog_btns():
+	$UI/HUD/Dialog.visible = false
+	var painted_array = $PaintedBuildings.get_children()
+	if painted_array.size() > 0:
+		for unit in painted_array:
+			unit.queue_free()
+	if has_painted_building:
+		has_painted_building = false
+	
+	var c = null
+#	if sell_mode:
+#		c = Callable(self,"erase_building")
+	if expanse_mode:
+		c = Callable(self,"buy_expansion")
+		
+	disconnect_dialog_buttons(c)
+
+func paint_building(base,color):
+	for cell in iso_coords_5_5:
+		var cell_white = load("res://scenes/white.tscn").instantiate()
+		cell_white.position = $Base.map_to_local(return_processed_iso_coords(base,cell))
+		cell_white.modulate = color
+		$PaintedBuildings.add_child(cell_white)
+#		print(g)
+	has_painted_building = true
+
+func return_processed_iso_coords(base,cell):
+	if absi(base.y % 2) == 1:
+		if cell.y % 2 == 1:
+			base.x += 1
+	return base + cell
 
 func update_map():
-	
-	for v in ortho:
-		for land in own_lands_array:
-			if land.y >= 0:
-				if land.y%2==1:
-					if v.y%2==1:
-						land.x += 1
-			else:
-				if land.y%2==-1:
-					if v.y%2==1:
-						land.x += 1
-			$Land.set_cell(0,v + land,0,Vector2i(0,0))
+	for cell in iso_coords_5_5:
+		for land_base in own_lands_array:
+			$Land.set_cell(0,return_processed_iso_coords(land_base,cell),0,Vector2i(0,0))
 
-#		$Land.set_pattern(0,land,$Land.tile_set.get_pattern(0))
-	
 	var roads_array = []
 	for item in buildings_data_array:
 		if item["type"] == "Road":
@@ -279,11 +371,21 @@ func get_atlas_positions_array_from_dims(dims,base) -> Array:
 			result.append(base + Vector2i(x,y))
 	return result
 
+func connect_dialog_buttons(dict,func_name):
+	for b in get_tree().get_nodes_in_group("dialog_buttons"):
+		if !b.pressed.is_connected(func_name):
+			b.pressed.connect(func_name.bind(b.name,dict))
+
+func disconnect_dialog_buttons(func_name):
+	if func_name != null:
+		for b in get_tree().get_nodes_in_group("dialog_buttons"):
+			if b.pressed.is_connected(func_name):
+				b.pressed.disconnect(func_name)
 
 func _on_done_button_pressed() -> void:
 	if has_lands_preview:
-		for l in get_node("UI/LandPreviews").get_children():
-			l.queue_free()
+		for preview in $ExpansionPreviews.get_children():
+			preview.queue_free()
 	$UI.modulate_ui(Color(1,1,1,1))
 	has_lands_preview = false
 	$Cells.visible = false
@@ -301,7 +403,12 @@ func _on_done_button_pressed() -> void:
 	$UI/HUD/Menu.visible = true
 	$UI/HUD/DoneButton.visible = false
 	$UI/HUD/Dialog.visible = false
-	var color_rect_array = $UI/ColoredRectangles.get_children()
-	if color_rect_array.size() > 0:
-		for r in color_rect_array:
-			r.queue_free()
+	
+	if GlobalSignal.pick_expansion.is_connected(Callable(self,"manage_expanse")):
+		GlobalSignal.pick_expansion.disconnect(Callable(self,"manage_expanse"))
+#	exp_to_buy_base = null
+	
+	var painted_array = $PaintedBuildings.get_children()
+	if painted_array.size() > 0:
+		for unit in painted_array:
+			unit.queue_free()
