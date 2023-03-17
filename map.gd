@@ -13,7 +13,10 @@ var sell_mode = false
 var move_mode = false
 var drag_mode = false
 var expanse_mode = false
-var idle_mode = true
+var dialog_mode = false
+
+
+
 
 var mouse_pressing = false
 var is_first_time = true
@@ -64,18 +67,21 @@ var iso_coords_5_5 = [
 signal exper
 
 func _ready() -> void:
+	
+	Globals.play_mode = true
+	
 	$CameraManager.limit_bottom = 4 * LIMIT # 2000
 	$CameraManager.limit_left = -4 * LIMIT # -2000
 	$CameraManager.limit_right = 6 * LIMIT # 3000
 	$CameraManager.limit_top = -3 * LIMIT # -1500
 
-#	load_config()
-#	if is_first_time:
-#		build_main_hall()
-#	else:
-#		load_from_buildings_data_file()
-	build_main_hall()
+	load_config()
+	if is_first_time:
+		build_main_hall()
+	else:
+		load_from_buildings_data_file()
 	update_map()
+	
 	default_cursor = load("res://assets/ui/default_cursor_32.png")
 	move_cursor = load("res://assets/ui/move_cursor_32.png")
 	sell_cursor = load("res://assets/ui/sell_cursor_32.png")
@@ -84,15 +90,38 @@ func _ready() -> void:
 		b.pressed.connect(init_menu_mode.bind(b))
 	for b in get_tree().get_nodes_in_group("build_buttons"):
 		b.pressed.connect(init_build_mode.bind(b))
+#	print($Land.get_used_cells(0))
 	
 
 func _process(_delta: float) -> void:
+#	print(Globals.is_cursor_on_occupied)
+#	print(is_cell_legal_to_place(get_global_mouse_position()))
 #	print(idle_mode,build_mode,expanse_mode,move_mode)
 	if build_mode or drag_mode:
 		update_building_preview()
+	show_modes()
+
+func show_modes():
+	var text = ""
+	if build_mode:
+		text += "build_mode / "
+	if sell_mode:
+		text += "sell_mode / "
+	if move_mode:
+		text += "move_mode / "
+	if drag_mode:
+		text += "drag_mode / "
+	if expanse_mode:
+		text += "expanse_mode / "
+	if dialog_mode:
+		text += "dialog_mode / "
+	if Globals.play_mode:
+		text += "play_mode / "
+	
+	$UI/HUD/DebugLabel.text = text
 
 func _unhandled_input(event: InputEvent) -> void:
-	if idle_mode:
+	if Globals.play_mode:
 		if event.is_action_released("ui_accept"):
 			var current_cell = get_global_mouse_position()
 #			var current_cell = $Base.local_to_map(get_global_mouse_position())
@@ -110,10 +139,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if move_mode:
 		if !has_lands_preview:
 			show_lands_for_sale()
+			expanse_mode = true
 			has_lands_preview = true
 		if event.is_action_released("ui_accept"):
 			var current_cell = $Land.local_to_map(get_global_mouse_position())
-			print("w",current_cell)
+			print("move",current_cell)
 			if $Buildings.get_used_cells(0).has(current_cell):
 				print(99999)
 #				for item in buildings_data_array:
@@ -147,10 +177,10 @@ func _unhandled_input(event: InputEvent) -> void:
 #					var callable = Callable(self,"buy_expansion")
 #					connect_dialog_buttons({"position": rect_for_sale},callable)
 	
-	if event is InputEventMouseMotion:
-		idle_mode = false
+	if event is InputEventMouseMotion and not dialog_mode:
 		mouse_pressing = Input.get_action_strength("ui_accept")
 		if mouse_pressing:
+			Globals.play_mode = false
 			$CameraManager.position.x = clamp(
 				$CameraManager.position.x,
 				$CameraManager.limit_left + half_camera_rect.x,
@@ -163,9 +193,8 @@ func _unhandled_input(event: InputEvent) -> void:
 				)
 			$CameraManager.position -= event.relative * zoom_factor
 	else:
-		idle_mode = true
+		Globals.play_mode = true
 	
-#	if idle_mode:
 #	if event is InputEventMouseButton:
 #		half_camera_rect = get_viewport_rect().size * zoom_factor * 0.5
 #			if event.is_pressed():
@@ -221,6 +250,24 @@ func build_main_hall():
 		Vector2i(5, 10),
 		Vector2i(7, 15),
 		]
+	var mh = load("res://scenes/main_hall.tscn").instantiate()
+#	print($Land.map_to_local(Vector2i(10, 0)))
+	mh.position = $Land.map_to_local(Vector2i(10, 0))
+	var mh_dict = {
+				"id": str(Time.get_unix_time_from_system()).split(".")[0],
+				"type": "Main_Hall",
+				"base": Vector2i(10,0),
+				"level": 1,
+#				"dims": Vector2i(6,7),
+				"connected": true,
+				"last_coll": str(Time.get_unix_time_from_system()).split(".")[0]
+	}
+	buildings_data_array.append(mh_dict)
+	$BuildingS.add_child(mh)
+	
+	file_manager.save_to_file("buildings_data",buildings_data_array)
+	file_manager.save_to_file("lands_data",own_lands_array)
+	file_manager.save_to_file("config","not_first_time")
 
 func load_from_buildings_data_file() :
 	var content: Array = file_manager.load_from_file("buildings_data") as Array
@@ -234,12 +281,19 @@ func load_from_buildings_data_file() :
 func update_building_preview():
 	var current_cell = $Base.local_to_map(get_global_mouse_position())
 	var current_cell_in_px = Vector2i($Base.map_to_local(current_cell))
+#	if not Globals.is_cursor_on_occupied and is_cell_legal_to_place(current_cell_in_px):
+#		print(11111)
+#	else:
+#		print(99999)
 	$UI.update_building_preview(current_cell_in_px,Vector2i($CameraManager.position),"44ffffff")
 #	prints(current_cell)
 
+func is_cell_legal_to_place(cell: Vector2i) -> bool:
+	return $Land.get_used_cells(0).has($Land.local_to_map(cell))# and $Land.get_cell_source_id(0, $Land.local_to_map(cell)) == 0
+
 func init_build_mode(btn):
 	build_mode = true
-	idle_mode = false
+	Globals.play_mode = false
 	build_type = btn.name
 	$Cells.visible = true
 	$UI/HUD/BuildButtons.visible = false
@@ -260,7 +314,8 @@ func load_config():
 		is_first_time = false
 
 func show_lands_for_sale():
-	$UI.modulate_ui(Color(1,1,1,0.4))
+	$Base.modulate = Color(1,1,1,0.4)
+#	$UI.modulate_ui(Color(1,1,1,0.4))
 #	print(own_lands_array)
 	for_sale_lands_array.clear()
 	for l in own_lands_array:
@@ -288,16 +343,20 @@ func show_lands_for_sale():
 		b.position = $Land.map_to_local(l)
 		b.add_to_group("expansions")
 		$ExpansionPreviews.add_child(b)
-	if !GlobalSignal.pick_expansion.is_connected(Callable(self,"manage_expanse")):
-		GlobalSignal.pick_expansion.connect(Callable(self,"manage_expanse"))
+	if !Globals.pick_expansion.is_connected(Callable(self,"manage_expanse")):
+		Globals.pick_expansion.connect(Callable(self,"manage_expanse"))
 
 func manage_expanse(pos):
 	if !has_painted_building:
+		
 		var exp_pos = $Base.local_to_map(pos)
 		paint_building(exp_pos,Color(0,0,1,0.2))
 #		GlobalSignal.pick_expansion.disconnect(Callable(self,"manage_expanse"))
+#		if GlobalSignal.pick_expansion.is_connected(Callable(self,"manage_expanse")):
+#			GlobalSignal.pick_expansion.disconnect(Callable(self,"manage_expanse"))
 		$UI/HUD/Dialog/VBoxContainer/Label.text = "Buy Expansion?"
 		$UI/HUD/Dialog.visible = true
+		$UI/HUD/DoneButton.visible = false
 		var callable = Callable(self,"buy_expansion")
 		connect_dialog_buttons({"position": exp_pos},callable)
 #		print("wewe",$Base.local_to_map(pos))
@@ -319,6 +378,7 @@ func buy_expansion(btn_name,dict):
 
 func desactivate_dialog_btns():
 	$UI/HUD/Dialog.visible = false
+	$UI/HUD/DoneButton.visible = true
 	var painted_array = $PaintedBuildings.get_children()
 	if painted_array.size() > 0:
 		for unit in painted_array:
@@ -353,16 +413,19 @@ func update_map():
 	for cell in iso_coords_5_5:
 		for land_base in own_lands_array:
 			$Land.set_cell(0,return_processed_iso_coords(land_base,cell),0,Vector2i(0,0))
-
-	var roads_array = []
-	for item in buildings_data_array:
-		if item["type"] == "Road":
-			roads_array.append(item["base"])
-		else:
-			for cell in get_atlas_positions_array_from_dims(item["dims"],item["base"]):
-				var sourse_id = BUILDING_TYPE[item["type"].to_upper()] if item["connected"] else BUILDING_TYPE[item["type"].to_upper()] + 2
-				$Buildings.set_cell(0, cell, sourse_id, cell - item["base"])
-	$Buildings.set_cells_terrain_connect(0,roads_array,0,0,false)
+	for b in buildings_data_array:
+		var b_instance = load("res://scenes/"+b["type"].to_lower()+".tscn").instantiate()
+		b_instance.position = $Land.map_to_local(b["base"])
+		$BuildingS.add_child(b_instance)
+#	var roads_array = []
+#	for item in buildings_data_array:
+#		if item["type"] == "Road":
+#			roads_array.append(item["base"])
+#		else:
+#			for cell in get_atlas_positions_array_from_dims(item["dims"],item["base"]):
+#				var sourse_id = BUILDING_TYPE[item["type"].to_upper()] if item["connected"] else BUILDING_TYPE[item["type"].to_upper()] + 2
+#				$Buildings.set_cell(0, cell, sourse_id, cell - item["base"])
+#	$Buildings.set_cells_terrain_connect(0,roads_array,0,0,false)
 
 func get_atlas_positions_array_from_dims(dims,base) -> Array:
 	var result = []
@@ -372,11 +435,13 @@ func get_atlas_positions_array_from_dims(dims,base) -> Array:
 	return result
 
 func connect_dialog_buttons(dict,func_name):
+	dialog_mode = true
 	for b in get_tree().get_nodes_in_group("dialog_buttons"):
 		if !b.pressed.is_connected(func_name):
 			b.pressed.connect(func_name.bind(b.name,dict))
 
 func disconnect_dialog_buttons(func_name):
+	dialog_mode = false
 	if func_name != null:
 		for b in get_tree().get_nodes_in_group("dialog_buttons"):
 			if b.pressed.is_connected(func_name):
@@ -386,12 +451,13 @@ func _on_done_button_pressed() -> void:
 	if has_lands_preview:
 		for preview in $ExpansionPreviews.get_children():
 			preview.queue_free()
-	$UI.modulate_ui(Color(1,1,1,1))
+	$Base.modulate = Color(1,1,1,1)
+#	$UI.modulate_ui(Color(1,1,1,1))
 	has_lands_preview = false
 	$Cells.visible = false
 	has_painted_building = false
 	
-	idle_mode = true
+	Globals.play_mode = true
 	sell_mode = false
 	move_mode = false
 	build_mode = false
@@ -404,8 +470,8 @@ func _on_done_button_pressed() -> void:
 	$UI/HUD/DoneButton.visible = false
 	$UI/HUD/Dialog.visible = false
 	
-	if GlobalSignal.pick_expansion.is_connected(Callable(self,"manage_expanse")):
-		GlobalSignal.pick_expansion.disconnect(Callable(self,"manage_expanse"))
+	if Globals.pick_expansion.is_connected(Callable(self,"manage_expanse")):
+		Globals.pick_expansion.disconnect(Callable(self,"manage_expanse"))
 #	exp_to_buy_base = null
 	
 	var painted_array = $PaintedBuildings.get_children()
