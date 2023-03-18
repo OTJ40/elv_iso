@@ -10,7 +10,7 @@ func _ready() -> void:
 	add_child(press_timer)
 
 #func _process(delta: float) -> void:
-#	print(get_viewport().get_mouse_position())
+#	print(get_viewport_transform().origin)
 
 func _on_input_event(_viewport: Node, event: InputEvent, _shape_idx: int) -> void:
 	if event.is_pressed():
