@@ -26,6 +26,14 @@ var half_camera_rect = Vector2i()
 var zoom_factor = 1.0
 var buildings_data_array = []
 var own_lands_array = []
+var own_lands_array_ortho = [
+		Vector2i(10, 0),
+		Vector2i(15, 0),
+		Vector2i(10, 5),
+		Vector2i(15, 5),
+		Vector2i(10, 10),
+		Vector2i(15, 10),
+		]
 var for_sale_lands_array = []
 var file_manager: FileManager = FileManager.new()
 
@@ -37,8 +45,7 @@ var move_cursor
 var default_cursor
 
 var whitey = preload("res://scenes/white.tscn").instantiate()
-#var exp_to_buy_base = Vector2i()
-#var has_point_in_for_sale = false
+
 
 var even_directions = [
 	Vector2i(2,-5),
@@ -54,18 +61,8 @@ var odd_directions = [
 	Vector2i(-2,-5)
 	]
 
-var iso_coords_5_5 = [
-	Vector2i(-2, 4), Vector2i(-1, 2), Vector2i(-2, 3), Vector2i(-1, 4), Vector2i(-2, 5), 
-	Vector2i(-1, 6), Vector2i(0, 0), Vector2i(-1, 1), Vector2i(0, 2), Vector2i(-1, 3), 
-	Vector2i(0, 4), Vector2i(-1, 5), Vector2i(0, 6), Vector2i(-1, 7), Vector2i(0, 8), 
-	Vector2i(0, 1), Vector2i(1, 2), Vector2i(0, 3), Vector2i(1, 4), Vector2i(0, 5), 
-	Vector2i(1, 6), Vector2i(0, 7), Vector2i(1, 3), Vector2i(2, 4), Vector2i(1, 5)
-	]
-
-#signal exper
 
 func _ready() -> void:
-	
 	Globals.play_mode = true
 	
 	$CameraManager.limit_bottom = 4 * LIMIT # 2000
@@ -90,14 +87,37 @@ func _ready() -> void:
 		b.pressed.connect(init_build_mode.bind(b))
 
 
+
 func _process(_delta: float) -> void:
-#	prints(Globals.enter,Globals.exit)
-#	print(Globals.is_cursor_on_occupied)
-#	print(is_cell_legal_to_place(get_global_mouse_position()))
+	var current_cell = $Ortho/OrthoLand.local_to_map(get_global_mouse_position())
+#	print(current_cell)
+#	print(Globals.counter)
+	Globals.is_cursor_on_occupied = false if Globals.counter == 0 else true
 #	print(idle_mode,build_mode,expanse_mode,move_mode)
 	if build_mode or drag_mode:
 		update_building_preview()
 	show_modes()
+
+func get_iso_array(base: Vector2i,dims: Vector2i):
+	var result = []
+	for w in range(dims.x):
+		for h in range(dims.y):
+			result.append(get_iso_coord(base,Vector2i(w,h)))
+	return result
+
+func get_iso_coord(base,offset):
+	var result = base
+	for w in range(offset.x):
+		if absi(result.y % 2) == 1:
+			result += Vector2i(1,1)
+		else:
+			result += Vector2i(0,1)
+	for h in range(offset.y):
+		if absi(result.y % 2) == 1:
+			result += Vector2i(0,1)
+		else:
+			result += Vector2i(-1,1)
+	return result
 
 func show_modes():
 	var text = ""
@@ -122,28 +142,28 @@ func _unhandled_input(event: InputEvent) -> void:
 	if Globals.play_mode:
 		if event.is_action_released("ui_accept"):
 			var current_cell = get_global_mouse_position()
-#			var current_cell = $Base.local_to_map(get_global_mouse_position())
 	
 	if build_mode:
 		if event.is_action_released("ui_accept"):
 			place_building()
 			if build_type != "Road":
 				cancel_build_mode()
-				$IsoBase.modulate = Color(1,1,1,1)
+				$Iso/IsoBase.modulate = Color(1,1,1,1)
 		if event.is_action_released("ui_cancel"):
 			cancel_build_mode()
-			$IsoBase.modulate = Color(1,1,1,1)
+			$Iso/IsoBase.modulate = Color(1,1,1,1)
 	
 	if move_mode:
+		
 		if !has_lands_preview:
 			show_lands_for_sale()
 			expanse_mode = true
 			has_lands_preview = true
 		if event.is_action_released("ui_accept"):
-			var current_cell = $IsoLand.local_to_map(get_global_mouse_position())
+			var current_cell = $Iso/IsoLand.local_to_map(get_global_mouse_position())
 			print("move",current_cell)
-			if $IsoRoads.get_used_cells(0).has(current_cell):
-				print(99999)
+			if $Iso/IsoRoads.get_used_cells(0).has(current_cell):
+				pass
 #				for item in buildings_data_array:
 #					for pos in get_atlas_positions_array_from_dims(item["dims"],item["base"]):
 #						if current_cell == pos:
@@ -180,16 +200,9 @@ func _unhandled_input(event: InputEvent) -> void:
 #		half_camera_rect = get_viewport_rect().size * zoom_factor * 0.5
 #			if event.is_pressed():
 
-#func has_point_in_for_sale_lands(point: Vector2i) -> bool:
-#
-#	for n in get_tree().get_nodes_in_group("expansions"):
-#		print(n.has)
-	
-
 
 func place_building():
 	if place_valid:
-		pass
 		# -1- prepare dictionary
 		var dict = {}
 		var dims = get_build_dims()
@@ -211,11 +224,11 @@ func place_building():
 		}
 		# -2- place building
 		if build_type == "Road":
-			$IsoRoads.set_cells_terrain_connect(0,[build_location],0,0,false)
+			$Iso/IsoRoads.set_cells_terrain_connect(0,[build_location],0,0,false)
 		else:
 			var building_instance = load("res://scenes/" + build_type.to_lower() + ".tscn").instantiate()
-			building_instance.position = $IsoLand.map_to_local(build_location)
-			$BuildingS.add_child(building_instance)
+			building_instance.position = $Iso/IsoLand.map_to_local(build_location)
+			$Iso/BuildingS.add_child(building_instance)
 #			for cell in get_atlas_positions_array_from_dims(dims,build_location):
 #				if connected:
 #					$Buildings.set_cell(0,cell,BUILDING_TYPE[build_type.to_upper()],Vector2i(0,0)+cell)
@@ -227,10 +240,10 @@ func place_building():
 #	update_map()
 
 func cancel_build_mode():
-	$IsoCells.visible = false
+	$Iso/IsoCells.visible = false
 	place_valid = false
 	build_mode = false
-	get_node("BP/BuildingPreview").queue_free()
+	get_node("Iso/BP/BuildingPreview").queue_free()
 	$UI/HUD/BuildButtons.visible = true
 	$UI/HUD/DoneButton.visible = true
 
@@ -247,7 +260,7 @@ func init_menu_mode(btn):
 			$UI/HUD/DoneButton.visible = true
 		"MoveButton":
 			move_mode = true
-			$IsoCells.visible = true
+			$Iso/IsoCells.visible = true
 			DisplayServer.cursor_set_custom_image(move_cursor)
 			$UI/HUD/Menu.visible = false
 			$UI/HUD/DoneButton.visible = true
@@ -267,9 +280,16 @@ func build_main_hall():
 		Vector2i(5, 10),
 		Vector2i(7, 15),
 		]
+	own_lands_array_ortho = [
+		Vector2i(10, 0),
+		Vector2i(15, 0),
+		Vector2i(10, 5),
+		Vector2i(15, 5),
+		Vector2i(10, 10),
+		Vector2i(15, 10),
+		]
 	var mh = load("res://scenes/main_hall.tscn").instantiate()
-#	print($Land.map_to_local(Vector2i(10, 0)))
-	mh.position = $Land.map_to_local(Vector2i(10, 0))
+	mh.position = $Iso/IsoLand.map_to_local(Vector2i(10, 0))
 	var mh_dict = {
 				"id": str(Time.get_unix_time_from_system()).split(".")[0],
 				"type": "Main_Hall",
@@ -280,7 +300,7 @@ func build_main_hall():
 				"last_coll": str(Time.get_unix_time_from_system()).split(".")[0]
 	}
 	buildings_data_array.append(mh_dict)
-	$BuildingS.add_child(mh)
+	$Iso/BuildingS.add_child(mh)
 	
 	file_manager.save_to_file("buildings_data",buildings_data_array)
 	file_manager.save_to_file("lands_data",own_lands_array)
@@ -296,8 +316,8 @@ func load_from_buildings_data_file() :
 	own_lands_array.append_array(content)
 
 func update_building_preview():
-	var current_cell = $IsoBase.local_to_map(get_global_mouse_position())
-	var current_cell_in_px = Vector2i($IsoBase.map_to_local(current_cell))
+	var current_cell = $Iso/IsoBase.local_to_map(get_global_mouse_position())
+	var current_cell_in_px = Vector2i($Iso/IsoBase.map_to_local(current_cell))
 #	print(current_cell_in_px)
 	var count_cells = 0
 	for w in get_build_dims().x:
@@ -312,8 +332,6 @@ func update_building_preview():
 	else:
 		place_valid = false
 		update_building_previe(current_cell_in_px,Vector2i($CameraManager.position),"f600039c")
-		
-#	prints(build_location)
 
 func get_build_dims():
 	match build_type:
@@ -327,17 +345,17 @@ func get_build_dims():
 			return Vector2i(1,1)
 
 func is_cell_legal_to_place(cell: Vector2i) -> bool:
-	return $IsoLand.get_used_cells(0).has($IsoLand.local_to_map(cell))# and $Land.get_cell_source_id(0, $Land.local_to_map(cell)) == 0
+	return $Iso/IsoLand.get_used_cells(0).has($Iso/IsoLand.local_to_map(cell))
 
 func init_build_mode(btn):
 	build_mode = true
 	Globals.play_mode = false
 	build_type = btn.name
-	$IsoCells.visible = true
+	$Iso/IsoCells.visible = true
 	$UI/HUD/BuildButtons.visible = false
 	$UI/HUD/DoneButton.visible = false
 	if build_type != "Expansion":
-		$IsoBase.modulate = Color(1,1,1,0.4)
+		$Iso/IsoBase.modulate = Color(1,1,1,0.4)
 		set_building_preview(build_type, get_global_mouse_position())
 	else:
 		show_lands_for_sale()
@@ -353,13 +371,12 @@ func set_building_preview(building_type, preview_position):
 	control.add_child(drag_building,true)
 	control.position = preview_position
 	control.set_name("BuildingPreview")
-	$BP.add_child(control, true)
-#	move_child(get_node("BP/BuildingPreview"), 0)
+	$Iso/BP.add_child(control, true)
 
 
 func update_building_previe(new_pos, pos_offset,color):
-	get_node("BP/BuildingPreview").global_position = new_pos# - pos_offset
-	get_node("BP/BuildingPreview/DragBuilding").modulate = Color(color)
+	get_node("Iso/BP/BuildingPreview").global_position = new_pos# - pos_offset
+	get_node("Iso/BP/BuildingPreview/DragBuilding").modulate = Color(color)
 
 func load_config():
 	var content = file_manager.load_from_file("config")
@@ -367,33 +384,29 @@ func load_config():
 		is_first_time = false
 
 func show_lands_for_sale():
-	$IsoBase.modulate = Color(1,1,1,0.4)
+	$Iso/IsoBase.modulate = Color(1,1,1,0.4)
 	for_sale_lands_array.clear()
-	for l in own_lands_array:
-		if absi(l.y%2)==1:
+	for land in own_lands_array:
+		if absi(land.y % 2) == 1:
 			for dir in odd_directions:
-				if own_lands_array.has(dir + l):
+				if own_lands_array.has(dir + land):
 					continue
 				else:
-					if !for_sale_lands_array.has(dir + l):
-#						print(dir+l)
-						for_sale_lands_array.append(dir + l)
+					if !for_sale_lands_array.has(dir + land):
+						for_sale_lands_array.append(dir + land)
 		else:
 			for dir in even_directions:
-				if own_lands_array.has(dir + l):
+				if own_lands_array.has(dir + land):
 					continue
 				else:
-					if !for_sale_lands_array.has(dir + l):
-#						print(dir+l)
-						for_sale_lands_array.append(dir + l)
+					if !for_sale_lands_array.has(dir + land):
+						for_sale_lands_array.append(dir + land)
 
-#	print(for_sale_lands_array)
-	
 	for l in for_sale_lands_array:
-		var b = load("res://scenes/expansion.tscn").instantiate()
-		b.position = $IsoLand.map_to_local(l)
-		b.add_to_group("expansions")
-		$ExpansionPreviews.add_child(b)
+		var expansion_instance = load("res://scenes/expansion.tscn").instantiate()
+		expansion_instance.position = $Iso/IsoLand.map_to_local(l)
+		expansion_instance.add_to_group("expansions")
+		$Iso/ExpansionPreviews.add_child(expansion_instance)
 	
 	if !Globals.pick_expansion.is_connected(Callable(self,"manage_expanse")):
 		Globals.pick_expansion.connect(Callable(self,"manage_expanse"))
@@ -401,8 +414,8 @@ func show_lands_for_sale():
 func manage_expanse(pos):
 	if !has_painted_building:
 		
-		var exp_pos = $IsoBase.local_to_map(pos)
-		paint_building(exp_pos,Color(0,0,1,0.2))
+		var exp_pos = $Iso/IsoBase.local_to_map(pos)
+		paint_building(exp_pos,Vector2i(5,5), Color(0,0,1,0.2))
 #		GlobalSignal.pick_expansion.disconnect(Callable(self,"manage_expanse"))
 #		if GlobalSignal.pick_expansion.is_connected(Callable(self,"manage_expanse")):
 #			GlobalSignal.pick_expansion.disconnect(Callable(self,"manage_expanse"))
@@ -411,16 +424,15 @@ func manage_expanse(pos):
 		$UI/HUD/DoneButton.visible = false
 		var callable = Callable(self,"buy_expansion")
 		connect_dialog_buttons({"position": exp_pos},callable)
-#		print("wewe",$Base.local_to_map(pos))
 
 func buy_expansion(btn_name,dict):
 	if btn_name == "Yes":
 		own_lands_array.append(dict["position"])
-		for cell in iso_coords_5_5:
-			$IsoLand.set_cell(0,return_processed_iso_coords(dict["position"],cell),0,Vector2i(0,0))
+		for cell in get_iso_array(dict["position"],Vector2i(5,5)):
+			$Iso/IsoLand.set_cell(0,cell,0,Vector2i(0,0))
 		file_manager.save_to_file("lands_data", own_lands_array)
 		if has_lands_preview:
-			for l in $ExpansionPreviews.get_children():
+			for l in $Iso/ExpansionPreviews.get_children():
 				l.queue_free()
 		show_lands_for_sale()
 		desactivate_dialog_btns()
@@ -431,7 +443,7 @@ func buy_expansion(btn_name,dict):
 func desactivate_dialog_btns():
 	$UI/HUD/Dialog.visible = false
 	$UI/HUD/DoneButton.visible = true
-	var painted_array = $PaintedBuildings.get_children()
+	var painted_array = $Iso/PaintedBuildings.get_children()
 	if painted_array.size() > 0:
 		for unit in painted_array:
 			unit.queue_free()
@@ -446,25 +458,23 @@ func desactivate_dialog_btns():
 		
 	disconnect_dialog_buttons(c)
 
-func paint_building(base,color):
-	for cell in iso_coords_5_5:
+func paint_building(base: Vector2i,dims: Vector2i,color):
+	for cell in get_iso_array(base,dims):
 		var cell_white = load("res://scenes/white.tscn").instantiate()
-		cell_white.position = $IsoBase.map_to_local(return_processed_iso_coords(base,cell))
+		cell_white.position = $Iso/IsoBase.map_to_local(cell)
 		cell_white.modulate = color
-		$PaintedBuildings.add_child(cell_white)
-#		print(g)
+		$Iso/PaintedBuildings.add_child(cell_white)
 	has_painted_building = true
 
-func return_processed_iso_coords(base,cell):
-	if absi(base.y % 2) == 1:
-		if cell.y % 2 == 1:
-			base.x += 1
-	return base + cell
 
 func update_map():
-	for cell in iso_coords_5_5:
-		for land_base in own_lands_array:
-			$IsoLand.set_cell(0,return_processed_iso_coords(land_base,cell),0,Vector2i(0,0))
+	
+	for land_base in own_lands_array_ortho:
+		$Ortho/OrthoLand.set_pattern(0,land_base,$Ortho/OrthoLand.tile_set.get_pattern(0))
+	
+	for land_base in own_lands_array:
+		for cell in get_iso_array(land_base,Vector2i(5,5)):
+			$Iso/IsoLand.set_cell(0,cell,0,Vector2i(0,0))
 	
 	var roads_array = []
 	for item in buildings_data_array:
@@ -472,9 +482,9 @@ func update_map():
 			roads_array.append(item["base"])
 		else:
 			var b_instance = load("res://scenes/"+item["type"].to_lower()+".tscn").instantiate()
-			b_instance.position = $IsoLand.map_to_local(item["base"])
-			$BuildingS.add_child(b_instance)
-	$IsoRoads.set_cells_terrain_connect(0,roads_array,0,0,false)
+			b_instance.position = $Iso/IsoLand.map_to_local(item["base"])
+			$Iso/BuildingS.add_child(b_instance)
+	$Iso/IsoRoads.set_cells_terrain_connect(0,roads_array,0,0,false)
 	
 #	var roads_array = []
 #	for item in buildings_data_array:
@@ -486,12 +496,12 @@ func update_map():
 #				$Buildings.set_cell(0, cell, sourse_id, cell - item["base"])
 #	$Buildings.set_cells_terrain_connect(0,roads_array,0,0,false)
 
-func get_atlas_positions_array_from_dims(dims,base) -> Array:
-	var result = []
-	for y in dims.y:
-		for x in dims.x:
-			result.append(base + Vector2i(x,y))
-	return result
+#func get_atlas_positions_array_from_dims(dims,base) -> Array:
+#	var result = []
+#	for y in dims.y:
+#		for x in dims.x:
+#			result.append(base + Vector2i(x,y))
+#	return result
 
 func connect_dialog_buttons(dict,func_name):
 	dialog_mode = true
@@ -508,12 +518,11 @@ func disconnect_dialog_buttons(func_name):
 
 func _on_done_button_pressed() -> void:
 	if has_lands_preview:
-		for preview in $ExpansionPreviews.get_children():
+		for preview in $Iso/ExpansionPreviews.get_children():
 			preview.queue_free()
-	$IsoBase.modulate = Color(1,1,1,1)
-#	$UI.modulate_ui(Color(1,1,1,1))
+	$Iso/IsoBase.modulate = Color(1,1,1,1)
 	has_lands_preview = false
-	$IsoCells.visible = false
+	$Iso/IsoCells.visible = false
 	has_painted_building = false
 	
 	Globals.play_mode = true
@@ -531,13 +540,14 @@ func _on_done_button_pressed() -> void:
 	
 	if Globals.pick_expansion.is_connected(Callable(self,"manage_expanse")):
 		Globals.pick_expansion.disconnect(Callable(self,"manage_expanse"))
-#	exp_to_buy_base = null
 	
-	var painted_array = $PaintedBuildings.get_children()
+	var painted_array = $Iso/PaintedBuildings.get_children()
 	if painted_array.size() > 0:
 		for unit in painted_array:
 			unit.queue_free()
 
 
 func _on_iso_ortho_button_toggled(button_pressed: bool) -> void:
+	$Ortho.visible = !button_pressed
+	$Iso.visible = button_pressed
 	$UI/HUD/IsoOrthoButton.text = "IsoMode" if button_pressed else "OrthoMode"

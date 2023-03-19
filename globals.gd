@@ -2,7 +2,6 @@ extends Node
 
 var play_mode
 var is_cursor_on_occupied = false
-var enter = false
-var exit = true
+var counter = 0
 
 signal pick_expansion
