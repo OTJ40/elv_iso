@@ -58,7 +58,9 @@ func _ready() -> void:
 	else:
 		load_from_buildings_data_file()
 	update_map()
-	
+	update_buildings_on_map()
+	update_ortho_map()
+#	print(buildings_data_array_ortho)
 	default_cursor = load("res://assets/ui/default_cursor_32.png")
 	move_cursor = load("res://assets/ui/move_cursor_32.png")
 	sell_cursor = load("res://assets/ui/sell_cursor_32.png")
@@ -251,11 +253,14 @@ func place_building():
 		if build_type == "Road":
 			$Iso/IsoRoads.set_cells_terrain_connect(0,[build_location],0,0,false)
 		else:
-			var building_instance = load("res://scenes/" + build_type.to_lower() + ".tscn").instantiate()
-			building_instance.position = $Iso/IsoLand.map_to_local(build_location)
-			$Iso/BuildingS.add_child(building_instance)
-#			for cell in get_atlas_positions_array_from_dims(dims,build_location):
-#				if connected:
+			if connected:
+				var building_instance = load("res://scenes/" + build_type.to_lower() + ".tscn").instantiate()
+				building_instance.position = $Iso/IsoLand.map_to_local(build_location)
+				$Iso/BuildingS.add_child(building_instance)
+			else:
+				var building_instance = load("res://scenes/" + build_type.to_lower() + "_not.tscn").instantiate()
+				building_instance.position = $Iso/IsoLand.map_to_local(build_location)
+				$Iso/BuildingS.add_child(building_instance)
 #					$Buildings.set_cell(0,cell,BUILDING_TYPE[build_type.to_upper()],Vector2i(0,0)+cell)
 #				else:
 #					$Buildings.set_cell(0,cell,BUILDING_TYPE[build_type.to_upper()]+2,Vector2i(0,0)+cell)
@@ -286,6 +291,7 @@ func place_building():
 			"connected": dict["connected"],
 			"last_coll": dict["last_coll"]
 		}
+		# place ortho
 		if build_type == "Road":
 			$Ortho/OrthoBuildings.set_cells_terrain_connect(0,[dict_ortho["base"]],0,0,false)
 		else:
@@ -316,9 +322,7 @@ func place_building():
 							if i["id"] == b["id"]:
 								i["connected"] = true
 		
-		dict["connected"] = dict_ortho["connected"]
 		buildings_data_array.append(dict)
-		print(buildings_data_array)
 		buildings_data_array_ortho.append(dict_ortho)
 		update_ortho_map()
 		# -3- save changes
@@ -347,39 +351,62 @@ func get_item_from_buildings_data_array_by_position(pos_ort):
 func check_and_change_road_tree_after_place_or_erase(dict,bull):
 
 	if dict["type"] == "Road" and dict["connected"]:
-			for n in utils.get_neighbors_for_position(dict["base"]):
-				if get_type_from_buildings_data_array_ort(n) == "Road" and !is_road_connected_to_MH(n):
-					var tree = get_road_tree(n)
-					
-					# change roads
-					for road in tree:
-						var item = get_item_from_buildings_data_array_by_position(road)
-						item["connected"] = bull
-						# change item in iso_array
-						for i in buildings_data_array:
-							if i["id"] == item["id"]:
-								i["connected"] = bull
-					
-					# change buildings
-					var buildings = collect_all_buildings_along_the_roadtree(tree)
-					for item in buildings:
-						if bull:
-							item["connected"] = bull
-						else:
-							var neighbors = get_neighbors_for_building(item["base"],item["dims"])
-							item["connected"] = true if check_for_alt_roads(neighbors) else false
-						# change item in iso_array
-						for i in buildings_data_array:
-							if i["id"] == item["id"]:
-								i["connected"] = bull
+		for n in utils.get_neighbors_for_position(dict["base"]):
+			if get_type_from_buildings_data_array_ort(n) == "Road" and !is_road_connected_to_MH(n):
+				var tree = get_road_tree(n)
 				
-				elif is_type_not_road_or_main_hall(n):
-					var item = get_item_from_buildings_data_array_by_position(n)
-					var neighbors = get_neighbors_for_building(item["base"],item["dims"])
-					item["connected"] = true if check_for_alt_roads(neighbors) else bull
+				# change roads
+				for road in tree:
+					var item = get_item_from_buildings_data_array_by_position(road)
+					item["connected"] = bull
+					# change item in iso_array
 					for i in buildings_data_array:
 						if i["id"] == item["id"]:
 							i["connected"] = bull
+#							print(i)
+				
+				# change buildings
+				var buildings = collect_all_buildings_along_the_roadtree(tree)
+				for item in buildings:
+					if bull:
+						item["connected"] = bull
+					else:
+						var neighbors = get_neighbors_for_building(item["base"],item["dims"])
+						item["connected"] = true if check_for_alt_roads(neighbors) else false
+					# change item in iso_array
+					for i in buildings_data_array:
+						if i["id"] == item["id"]:
+							i["connected"] = bull
+							for b in $Iso/BuildingS.get_children():
+								if Vector2i(b.position) == i["base"]:
+									b.queue_free()
+							if i["connected"]:
+								var building_instance = load("res://scenes/" + i["type"].to_lower() + ".tscn").instantiate()
+								building_instance.position = $Iso/IsoLand.map_to_local(i["base"])
+								$Iso/BuildingS.add_child(building_instance)
+							else:
+								var building_instance = load("res://scenes/" + i["type"].to_lower() + "_not.tscn").instantiate()
+								building_instance.position = $Iso/IsoLand.map_to_local(i["base"])
+								$Iso/BuildingS.add_child(building_instance)
+			
+			elif is_type_not_road_or_main_hall(n):
+				var item = get_item_from_buildings_data_array_by_position(n)
+				var neighbors = get_neighbors_for_building(item["base"],item["dims"])
+				item["connected"] = true if check_for_alt_roads(neighbors) else bull
+				for i in buildings_data_array:
+					if i["id"] == item["id"]:
+						i["connected"] = bull
+						for b in $Iso/BuildingS.get_children():
+							if Vector2i(b.position) == i["base"]:
+								b.queue_free()
+						if i["connected"]:
+							var building_instance = load("res://scenes/" + i["type"].to_lower() + ".tscn").instantiate()
+							building_instance.position = $Iso/IsoLand.map_to_local(i["base"])
+							$Iso/BuildingS.add_child(building_instance)
+						else:
+							var building_instance = load("res://scenes/" + i["type"].to_lower() + "_not.tscn").instantiate()
+							building_instance.position = $Iso/IsoLand.map_to_local(i["base"])
+							$Iso/BuildingS.add_child(building_instance)
 
 func check_for_alt_roads(neighbors):
 	for n in neighbors:
@@ -432,34 +459,59 @@ func build_main_hall():
 	own_lands_array_ortho.clear()
 	for l in own_lands_array:
 		own_lands_array_ortho.append(utils.trans_iso_to_ortho(l))
+	
 	var mh = load("res://scenes/main_hall.tscn").instantiate()
 	mh.position = $Iso/IsoLand.map_to_local(Vector2i(10, 0))
 	var mh_dict = {
-				"id": str(Time.get_unix_time_from_system()).split(".")[0],
-				"type": "Main_Hall",
-				"base": Vector2i(10,0),
-				"level": 1,
-				"dims": Vector2i(6,7),
-				"connected": true,
-				"last_coll": str(Time.get_unix_time_from_system()).split(".")[0]
+		"id": str(Time.get_unix_time_from_system()).split(".")[0],
+		"type": "Main_Hall",
+		"base": Vector2i(10,0),
+		"level": 1,
+		"dims": Vector2i(6,7),
+		"connected": true,
+		"last_coll": str(Time.get_unix_time_from_system()).split(".")[0]
 	}
 	buildings_data_array.append(mh_dict)
 	$Iso/BuildingS.add_child(mh)
 	
 	var mh_dict_ortho = {
-				"id": mh_dict["id"],
-				"type": "Main_Hall",
-				"base": utils.trans_iso_to_ortho(Vector2i(10,0)),
-				"level": 1,
-				"dims": Vector2i(6,7),
-				"connected": true,
-				"last_coll": mh_dict["last_coll"]
+		"id": mh_dict["id"],
+		"type": "Main_Hall",
+		"base": utils.trans_iso_to_ortho(Vector2i(10,0)),
+		"level": 1,
+		"dims": Vector2i(6,7),
+		"connected": true,
+		"last_coll": mh_dict["last_coll"]
 	}
 	buildings_data_array_ortho.append(mh_dict_ortho)
 	var main_hall_atlas = utils._get_atlas_array(utils._get_atlas($Ortho/OrthoBuildings, BUILDING_TYPE.MAIN_HALL))
 	for cell in main_hall_atlas:
 		$Ortho/OrthoBuildings.set_cell(0,mh_dict_ortho["base"] + cell,BUILDING_TYPE.MAIN_HALL,Vector2i(0,0) + cell)
 	
+	# build 1 road
+	var road_dict = {}
+	road_dict = {
+		"id": str(Time.get_unix_time_from_system() + 1).split(".")[0],
+		"type": "Road",
+		"base": Vector2i(7,9),
+		"level": 1,
+		"dims": Vector2i(1,1),
+		"connected": true,
+		"last_coll": 0
+	}
+	$Iso/IsoRoads.set_cells_terrain_connect(0,[road_dict["base"]],0,0,false)
+	buildings_data_array.append(road_dict)
+	var road_dict_ortho = {
+		"id": road_dict["id"],
+		"type": "Road",
+		"base": utils.trans_iso_to_ortho(Vector2i(7,9)),
+		"level": 1,
+		"dims": Vector2i(1,1),
+		"connected": true,
+		"last_coll": 0
+	}
+	$Ortho/OrthoBuildings.set_cells_terrain_connect(0,[road_dict_ortho["base"]],0,0,false)
+	buildings_data_array_ortho.append(mh_dict_ortho)
 	file_manager.save_to_file("buildings_data",buildings_data_array)
 	file_manager.save_to_file("lands_data",own_lands_array)
 	file_manager.save_to_file("config","not_first_time")
@@ -480,13 +532,13 @@ func load_from_buildings_data_file() :
 	buildings_data_array_ortho.clear()
 	for b in buildings_data_array:
 		var dict_ortho = {
-				"id": b["id"],
-				"type": b["type"],
-				"base": utils.trans_iso_to_ortho(b["base"]),
-				"level": b["level"],
-				"dims": b["dims"],
-				"connected": b["connected"],
-				"last_coll": b["last_coll"]
+			"id": b["id"],
+			"type": b["type"],
+			"base": utils.trans_iso_to_ortho(b["base"]),
+			"level": b["level"],
+			"dims": b["dims"],
+			"connected": b["connected"],
+			"last_coll": b["last_coll"]
 		}
 		buildings_data_array_ortho.append(dict_ortho)
 
@@ -585,9 +637,9 @@ func show_lands_for_sale():
 					if !for_sale_lands_array.has(dir + land):
 						for_sale_lands_array.append(dir + land)
 
-	for l in for_sale_lands_array:
+	for land in for_sale_lands_array:
 		var expansion_instance = load("res://scenes/expansion.tscn").instantiate()
-		expansion_instance.position = $Iso/IsoLand.map_to_local(l)
+		expansion_instance.position = $Iso/IsoLand.map_to_local(land)
 		expansion_instance.add_to_group("expansions")
 		$Iso/ExpansionPreviews.add_child(expansion_instance)
 	
@@ -669,22 +721,28 @@ func update_ortho_map():
 	
 
 func update_map():
-	
 	for land_base in own_lands_array:
 		for cell in utils.get_iso_array(land_base,Vector2i(5,5)):
 			$Iso/IsoLand.set_cell(0,cell,0,Vector2i(0,0))
-	
+
+func update_buildings_on_map():
+
 	var roads_array = []
 	for item in buildings_data_array:
 		if item["type"] == "Road":
 			roads_array.append(item["base"])
 		else:
-			var b_instance = load("res://scenes/"+item["type"].to_lower()+".tscn").instantiate()
-			b_instance.position = $Iso/IsoLand.map_to_local(item["base"])
-			$Iso/BuildingS.add_child(b_instance)
+			if item["connected"]:
+				var b_instance = load("res://scenes/"+item["type"].to_lower()+".tscn").instantiate()
+				b_instance.position = $Iso/IsoLand.map_to_local(item["base"])
+				$Iso/BuildingS.add_child(b_instance)
+			else:
+				var b_instance = load("res://scenes/"+item["type"].to_lower()+"_not.tscn").instantiate()
+				b_instance.position = $Iso/IsoLand.map_to_local(item["base"])
+				$Iso/BuildingS.add_child(b_instance)
 	$Iso/IsoRoads.set_cells_terrain_connect(0,roads_array,0,0,false)
 
-	update_ortho_map()
+#	update_ortho_map()
 
 
 func connect_dialog_buttons(dict,func_name):
