@@ -2,10 +2,10 @@ extends Node2D
 
 
 enum BUILDING_TYPE{
-	ROAD,
 	MAIN_HALL,
-	HOUSE,
-	WORKSHOP
+	ROAD,
+	RESA,
+	WORK
 }
 
 var build_mode = false
@@ -24,18 +24,15 @@ var place_valid = false
 const LIMIT = 300
 var half_camera_rect = Vector2i()
 var zoom_factor = 1.0
+
 var buildings_data_array = []
+var buildings_data_array_ortho = []
 var own_lands_array = []
-var own_lands_array_ortho = [
-		Vector2i(10, 0),
-		Vector2i(15, 0),
-		Vector2i(10, 5),
-		Vector2i(15, 5),
-		Vector2i(10, 10),
-		Vector2i(15, 10),
-		]
+var own_lands_array_ortho = []
+
 var for_sale_lands_array = []
 var file_manager: FileManager = FileManager.new()
+var utils: Utils = Utils.new()
 
 var build_type
 var build_location
@@ -45,21 +42,6 @@ var move_cursor
 var default_cursor
 
 var whitey = preload("res://scenes/white.tscn").instantiate()
-
-
-var even_directions = [
-	Vector2i(2,-5),
-	Vector2i(2,5),
-	Vector2i(-3,5),
-	Vector2i(-3,-5)
-	]
-
-var odd_directions = [
-	Vector2i(3,-5),
-	Vector2i(3,5),
-	Vector2i(-2,5),
-	Vector2i(-2,-5)
-	]
 
 
 func _ready() -> void:
@@ -89,35 +71,20 @@ func _ready() -> void:
 
 
 func _process(_delta: float) -> void:
-	var current_cell = $Ortho/OrthoLand.local_to_map(get_global_mouse_position())
+	var current_cell = $Iso/IsoLand.local_to_map(get_global_mouse_position())
 #	print(current_cell)
 #	print(Globals.counter)
 	Globals.is_cursor_on_occupied = false if Globals.counter == 0 else true
 #	print(idle_mode,build_mode,expanse_mode,move_mode)
+	if dialog_mode:
+		$UI/HUD/IsoOrthoButton.visible = false
+	else:
+		$UI/HUD/IsoOrthoButton.visible = true
 	if build_mode or drag_mode:
 		update_building_preview()
 	show_modes()
 
-func get_iso_array(base: Vector2i,dims: Vector2i):
-	var result = []
-	for w in range(dims.x):
-		for h in range(dims.y):
-			result.append(get_iso_coord(base,Vector2i(w,h)))
-	return result
 
-func get_iso_coord(base,offset):
-	var result = base
-	for w in range(offset.x):
-		if absi(result.y % 2) == 1:
-			result += Vector2i(1,1)
-		else:
-			result += Vector2i(0,1)
-	for h in range(offset.y):
-		if absi(result.y % 2) == 1:
-			result += Vector2i(0,1)
-		else:
-			result += Vector2i(-1,1)
-	return result
 
 func show_modes():
 	var text = ""
@@ -175,7 +142,7 @@ func _unhandled_input(event: InputEvent) -> void:
 #			elif has_point_in_for_sale_lands(current_cell):
 #				expanse_mode = true
 	
-	if expanse_mode:
+	if expanse_mode: # ???
 		pass
 	
 	if event is InputEventMouseMotion and not dialog_mode:
@@ -200,19 +167,75 @@ func _unhandled_input(event: InputEvent) -> void:
 #		half_camera_rect = get_viewport_rect().size * zoom_factor * 0.5
 #			if event.is_pressed():
 
+func get_build_dims():
+	match build_type:
+		"Main_Hall":
+			return Vector2i(6,7)
+		"Resa":
+			return Vector2i(2,2)
+		"Work":
+			return Vector2i(2,2)
+		"Road":
+			return Vector2i(1,1)
+
+func get_type_from_buildings_data_array_ort(pos_ort):
+	for item in buildings_data_array_ortho:
+		for cell in utils.get_atlas_positions_array_from_dims(item["dims"],item["base"]):
+			if cell == pos_ort:
+				return item["type"]
+
+func is_road_connected_to_MH(pos_ort: Vector2i) -> bool:
+	var road_tree = get_road_tree(pos_ort)
+	for road_pos_ort in road_tree:
+		for n in utils.get_neighbors_for_position(road_pos_ort):
+			if get_type_from_buildings_data_array_ort(n) == "Main_Hall":
+				return true
+	return false
+
+func get_road_tree(pos_ort):
+	var road_tree = [pos_ort]
+	recursive_collecting_roads(pos_ort, road_tree)
+	return road_tree
+
+func recursive_collecting_roads(pos_ort, array):
+	for n in utils.get_neighbors_for_position(pos_ort):
+		if get_type_from_buildings_data_array_ort(n) == "Road":
+			if !array.has(n):
+				array.append(n)
+				recursive_collecting_roads(n, array)
+
+func get_connected_for_building_to_place(dims) -> bool:
+	for n in get_neighbors_for_building(utils.trans_iso_to_ortho(build_location),dims):
+		if get_type_from_buildings_data_array_ort(n) == "Road":
+			if is_road_connected_to_MH(n):
+				return true
+	return false
+
+func get_neighbors_for_building(base_pos_ort,dims):
+	var result = []
+	var pos_array = utils.get_atlas_positions_array_from_dims(dims,base_pos_ort)
+	for pos in pos_array:
+		if pos.x - base_pos_ort.x == 0 or pos.y - base_pos_ort.y == 0 or pos.x - base_pos_ort.x + 1 == dims.x or pos.y - base_pos_ort.y + 1 == dims.y:
+			for n in utils.get_neighbors_for_position(pos):
+				if pos_array.has(n):
+					continue
+				else:
+					if $Ortho/OrthoLand.get_cell_source_id(0,n) >= 0:
+						result.append(n)
+	return result
 
 func place_building():
 	if place_valid:
 		# -1- prepare dictionary
 		var dict = {}
 		var dims = get_build_dims()
-		var connected = true
-#		if build_type == "Road":
-#			connected = is_road_connected_to_MH(build_location)
-#		elif build_type == "Main_Hall":
-#			connected = true
-#		else:
-#			connected = get_connected_for_building_to_place(dims)
+		var connected: bool
+		if build_type == "Road":
+			connected = is_road_connected_to_MH(utils.trans_iso_to_ortho(build_location))
+		elif build_type == "Main_Hall":
+			connected = true
+		else:
+			connected = get_connected_for_building_to_place(dims)
 		dict = {
 			"id": str(Time.get_unix_time_from_system()).split(".")[0],
 			"type": build_type,
@@ -222,6 +245,8 @@ func place_building():
 			"connected": connected,
 			"last_coll": str(0) if build_type == "Road" else str(Time.get_unix_time_from_system()).split(".")[0]
 		}
+		
+		
 		# -2- place building
 		if build_type == "Road":
 			$Iso/IsoRoads.set_cells_terrain_connect(0,[build_location],0,0,false)
@@ -234,10 +259,134 @@ func place_building():
 #					$Buildings.set_cell(0,cell,BUILDING_TYPE[build_type.to_upper()],Vector2i(0,0)+cell)
 #				else:
 #					$Buildings.set_cell(0,cell,BUILDING_TYPE[build_type.to_upper()]+2,Vector2i(0,0)+cell)
+		
+#		# check and change connected 
+#		if dict["type"] == "Road":
+#			check_and_change_road_tree_after_place_or_erase(dict,true)
+#		elif dict["type"] == "Main_Hall":
+#			var mh_neighbors = get_neighbors_for_building(dict["base"],dict["dims"])
+#			for mh_n in mh_neighbors:
+#				if get_type_from_buildings_data_array(mh_n) == "Road":
+#					var tree = get_road_tree(mh_n)
+#					for road in tree:
+#						var item = get_item_from_buildings_data_array_by_position(road)
+#						item["connected"] = true
+#					var buildings = collect_all_buildings_along_the_roadtree(tree)
+#					for b in buildings:
+#						b["connected"] = true
+		
+		
+		# ortho
+		var dict_ortho = {
+			"id": dict["id"],
+			"type": dict["type"],
+			"base": utils.trans_iso_to_ortho(dict["base"]),
+			"level": dict["level"],
+			"dims": dict["dims"],
+			"connected": dict["connected"],
+			"last_coll": dict["last_coll"]
+		}
+		if build_type == "Road":
+			$Ortho/OrthoBuildings.set_cells_terrain_connect(0,[dict_ortho["base"]],0,0,false)
+		else:
+			for cell in utils.get_atlas_positions_array_from_dims(dict_ortho["dims"],dict_ortho["base"]):
+				if dict_ortho["connected"]:
+					$Ortho/OrthoBuildings.set_cell(0,cell,BUILDING_TYPE[build_type.to_upper()],Vector2i(0,0)+cell)
+				else:
+					$Ortho/OrthoBuildings.set_cell(0,cell,BUILDING_TYPE[build_type.to_upper()]+2,Vector2i(0,0)+cell)
+		
+		# check and change connected 
+		if dict_ortho["type"] == "Road":
+			check_and_change_road_tree_after_place_or_erase(dict_ortho,true)
+		elif dict_ortho["type"] == "Main_Hall":
+			var mh_neighbors = get_neighbors_for_building(dict_ortho["base"],dict_ortho["dims"])
+			for mh_n in mh_neighbors:
+				if get_type_from_buildings_data_array_ort(mh_n) == "Road":
+					var tree = get_road_tree(mh_n)
+					for road in tree:
+						var item = get_item_from_buildings_data_array_by_position(road)
+						item["connected"] = true
+						for i in buildings_data_array:
+							if i["id"] == item["id"]:
+								i["connected"] = true
+					var buildings = collect_all_buildings_along_the_roadtree(tree)
+					for b in buildings:
+						b["connected"] = true
+						for i in buildings_data_array:
+							if i["id"] == b["id"]:
+								i["connected"] = true
+		
+		dict["connected"] = dict_ortho["connected"]
 		buildings_data_array.append(dict)
+		print(buildings_data_array)
+		buildings_data_array_ortho.append(dict_ortho)
+		update_ortho_map()
 		# -3- save changes
 		file_manager.save_to_file("buildings_data", buildings_data_array)
 #	update_map()
+
+func collect_all_buildings_along_the_roadtree(road_tree):
+	var result = []
+	for road_pos in road_tree:
+		for n in utils.get_neighbors_for_position(road_pos):
+			if is_type_not_road_or_main_hall(n):
+				var bui = get_item_from_buildings_data_array_by_position(n)
+				if !result.has(bui):
+					result.append(bui)
+	return result
+
+func is_type_not_road_or_main_hall(pos_ort : Vector2i) -> bool:
+	return $Ortho/OrthoBuildings.get_cell_source_id(0,pos_ort) > 1
+
+func get_item_from_buildings_data_array_by_position(pos_ort):
+	for item in buildings_data_array_ortho:
+		for cell in utils.get_atlas_positions_array_from_dims(item["dims"],item["base"]):
+			if cell == pos_ort:
+				return item
+
+func check_and_change_road_tree_after_place_or_erase(dict,bull):
+
+	if dict["type"] == "Road" and dict["connected"]:
+			for n in utils.get_neighbors_for_position(dict["base"]):
+				if get_type_from_buildings_data_array_ort(n) == "Road" and !is_road_connected_to_MH(n):
+					var tree = get_road_tree(n)
+					
+					# change roads
+					for road in tree:
+						var item = get_item_from_buildings_data_array_by_position(road)
+						item["connected"] = bull
+						# change item in iso_array
+						for i in buildings_data_array:
+							if i["id"] == item["id"]:
+								i["connected"] = bull
+					
+					# change buildings
+					var buildings = collect_all_buildings_along_the_roadtree(tree)
+					for item in buildings:
+						if bull:
+							item["connected"] = bull
+						else:
+							var neighbors = get_neighbors_for_building(item["base"],item["dims"])
+							item["connected"] = true if check_for_alt_roads(neighbors) else false
+						# change item in iso_array
+						for i in buildings_data_array:
+							if i["id"] == item["id"]:
+								i["connected"] = bull
+				
+				elif is_type_not_road_or_main_hall(n):
+					var item = get_item_from_buildings_data_array_by_position(n)
+					var neighbors = get_neighbors_for_building(item["base"],item["dims"])
+					item["connected"] = true if check_for_alt_roads(neighbors) else bull
+					for i in buildings_data_array:
+						if i["id"] == item["id"]:
+							i["connected"] = bull
+
+func check_for_alt_roads(neighbors):
+	for n in neighbors:
+		if get_type_from_buildings_data_array_ort(n) == "Road":
+			if is_road_connected_to_MH(n):
+				return true
+	return false
 
 func cancel_build_mode():
 	$Iso/IsoCells.visible = false
@@ -280,14 +429,9 @@ func build_main_hall():
 		Vector2i(5, 10),
 		Vector2i(7, 15),
 		]
-	own_lands_array_ortho = [
-		Vector2i(10, 0),
-		Vector2i(15, 0),
-		Vector2i(10, 5),
-		Vector2i(15, 5),
-		Vector2i(10, 10),
-		Vector2i(15, 10),
-		]
+	own_lands_array_ortho.clear()
+	for l in own_lands_array:
+		own_lands_array_ortho.append(utils.trans_iso_to_ortho(l))
 	var mh = load("res://scenes/main_hall.tscn").instantiate()
 	mh.position = $Iso/IsoLand.map_to_local(Vector2i(10, 0))
 	var mh_dict = {
@@ -302,6 +446,20 @@ func build_main_hall():
 	buildings_data_array.append(mh_dict)
 	$Iso/BuildingS.add_child(mh)
 	
+	var mh_dict_ortho = {
+				"id": mh_dict["id"],
+				"type": "Main_Hall",
+				"base": utils.trans_iso_to_ortho(Vector2i(10,0)),
+				"level": 1,
+				"dims": Vector2i(6,7),
+				"connected": true,
+				"last_coll": mh_dict["last_coll"]
+	}
+	buildings_data_array_ortho.append(mh_dict_ortho)
+	var main_hall_atlas = utils._get_atlas_array(utils._get_atlas($Ortho/OrthoBuildings, BUILDING_TYPE.MAIN_HALL))
+	for cell in main_hall_atlas:
+		$Ortho/OrthoBuildings.set_cell(0,mh_dict_ortho["base"] + cell,BUILDING_TYPE.MAIN_HALL,Vector2i(0,0) + cell)
+	
 	file_manager.save_to_file("buildings_data",buildings_data_array)
 	file_manager.save_to_file("lands_data",own_lands_array)
 	file_manager.save_to_file("config","not_first_time")
@@ -314,38 +472,63 @@ func load_from_buildings_data_file() :
 	content = file_manager.load_from_file("lands_data") as Array
 	own_lands_array.clear()
 	own_lands_array.append_array(content)
+	
+	own_lands_array_ortho.clear()
+	for l in own_lands_array:
+		own_lands_array_ortho.append(utils.trans_iso_to_ortho(l))
+	
+	buildings_data_array_ortho.clear()
+	for b in buildings_data_array:
+		var dict_ortho = {
+				"id": b["id"],
+				"type": b["type"],
+				"base": utils.trans_iso_to_ortho(b["base"]),
+				"level": b["level"],
+				"dims": b["dims"],
+				"connected": b["connected"],
+				"last_coll": b["last_coll"]
+		}
+		buildings_data_array_ortho.append(dict_ortho)
+
 
 func update_building_preview():
 	var current_cell = $Iso/IsoBase.local_to_map(get_global_mouse_position())
 	var current_cell_in_px = Vector2i($Iso/IsoBase.map_to_local(current_cell))
 #	print(current_cell_in_px)
+	
+	var atlas = utils._get_atlas_array($Ortho/OrthoBuildings.tile_set.get_source(BUILDING_TYPE[build_type.to_upper()])) if build_type != "Road" else [Vector2i(0,0)]
 	var count_cells = 0
-	for w in get_build_dims().x:
-		for h in get_build_dims().y:
-			var cell = current_cell_in_px +  w * Vector2i(32,16) + h * Vector2i(-32,16)
-			if is_cell_legal_to_place(cell):
-				count_cells += 1
-	if count_cells == get_build_dims().x * get_build_dims().y and not Globals.is_cursor_on_occupied:
+	for cell in atlas:
+		if $Ortho/OrthoBuildings.get_cell_source_id(0,utils.trans_iso_to_ortho(current_cell) + cell) == -1 and is_cell_legal_to_place($Ortho/OrthoLand,utils.trans_iso_to_ortho(current_cell) + cell):
+			count_cells += 1
+#	prints(count_cells)
+	if count_cells == atlas.size():
+		update_building_previe(current_cell_in_px,Vector2i($CameraManager.position),"33fd146b")
 		place_valid = true
 		build_location = current_cell
-		update_building_previe(current_cell_in_px,Vector2i($CameraManager.position),"33fd146b")
 	else:
-		place_valid = false
 		update_building_previe(current_cell_in_px,Vector2i($CameraManager.position),"f600039c")
+		place_valid = false
+	
+#	var count_cells = 0
+#	for w in utils.get_build_dims().x:
+#		for h in utils.get_build_dims().y:
+#			var cell = current_cell_in_px +  w * Vector2i(32,16) + h * Vector2i(-32,16)
+#			if is_cell_legal_to_place(cell):
+#				count_cells += 1
+#	if count_cells == utils.get_build_dims().x * utils.get_build_dims().y and not Globals.is_cursor_on_occupied:
+#		place_valid = true
+#		build_location = current_cell
+#		update_building_previe(current_cell_in_px,Vector2i($CameraManager.position),"33fd146b")
+#	else:
+#		place_valid = false
+#		update_building_previe(current_cell_in_px,Vector2i($CameraManager.position),"f600039c")
 
-func get_build_dims():
-	match build_type:
-		"Main_Hall":
-			return Vector2i(6,7)
-		"Resa":
-			return Vector2i(2,2)
-		"Work":
-			return Vector2i(2,2)
-		"Road":
-			return Vector2i(1,1)
 
-func is_cell_legal_to_place(cell: Vector2i) -> bool:
-	return $Iso/IsoLand.get_used_cells(0).has($Iso/IsoLand.local_to_map(cell))
+
+func is_cell_legal_to_place(map: TileMap,cell: Vector2i) -> bool:
+	var used_cells = map.get_used_cells(0)
+	return used_cells.has(cell)
 
 func init_build_mode(btn):
 	build_mode = true
@@ -388,14 +571,14 @@ func show_lands_for_sale():
 	for_sale_lands_array.clear()
 	for land in own_lands_array:
 		if absi(land.y % 2) == 1:
-			for dir in odd_directions:
+			for dir in utils.odd_directions:
 				if own_lands_array.has(dir + land):
 					continue
 				else:
 					if !for_sale_lands_array.has(dir + land):
 						for_sale_lands_array.append(dir + land)
 		else:
-			for dir in even_directions:
+			for dir in utils.even_directions:
 				if own_lands_array.has(dir + land):
 					continue
 				else:
@@ -428,7 +611,10 @@ func manage_expanse(pos):
 func buy_expansion(btn_name,dict):
 	if btn_name == "Yes":
 		own_lands_array.append(dict["position"])
-		for cell in get_iso_array(dict["position"],Vector2i(5,5)):
+		
+		own_lands_array_ortho.append(utils.trans_iso_to_ortho(dict["position"]))
+		update_ortho_map()
+		for cell in utils.get_iso_array(dict["position"],Vector2i(5,5)):
 			$Iso/IsoLand.set_cell(0,cell,0,Vector2i(0,0))
 		file_manager.save_to_file("lands_data", own_lands_array)
 		if has_lands_preview:
@@ -459,7 +645,7 @@ func desactivate_dialog_btns():
 	disconnect_dialog_buttons(c)
 
 func paint_building(base: Vector2i,dims: Vector2i,color):
-	for cell in get_iso_array(base,dims):
+	for cell in utils.get_iso_array(base,dims):
 		var cell_white = load("res://scenes/white.tscn").instantiate()
 		cell_white.position = $Iso/IsoBase.map_to_local(cell)
 		cell_white.modulate = color
@@ -467,13 +653,25 @@ func paint_building(base: Vector2i,dims: Vector2i,color):
 	has_painted_building = true
 
 
-func update_map():
-	
+func update_ortho_map():
 	for land_base in own_lands_array_ortho:
 		$Ortho/OrthoLand.set_pattern(0,land_base,$Ortho/OrthoLand.tile_set.get_pattern(0))
 	
+	var roads_array = []
+	for item in buildings_data_array_ortho:
+		if item["type"] == "Road":
+			roads_array.append(item["base"])
+		else:
+			for cell in utils.get_atlas_positions_array_from_dims(item["dims"],item["base"]):
+				var sourse_id = BUILDING_TYPE[item["type"].to_upper()] if item["connected"] else BUILDING_TYPE[item["type"].to_upper()] + 2
+				$Ortho/OrthoBuildings.set_cell(0, cell, sourse_id, cell - item["base"])
+	$Ortho/OrthoBuildings.set_cells_terrain_connect(0,roads_array,0,0,false)
+	
+
+func update_map():
+	
 	for land_base in own_lands_array:
-		for cell in get_iso_array(land_base,Vector2i(5,5)):
+		for cell in utils.get_iso_array(land_base,Vector2i(5,5)):
 			$Iso/IsoLand.set_cell(0,cell,0,Vector2i(0,0))
 	
 	var roads_array = []
@@ -485,23 +683,9 @@ func update_map():
 			b_instance.position = $Iso/IsoLand.map_to_local(item["base"])
 			$Iso/BuildingS.add_child(b_instance)
 	$Iso/IsoRoads.set_cells_terrain_connect(0,roads_array,0,0,false)
-	
-#	var roads_array = []
-#	for item in buildings_data_array:
-#		if item["type"] == "Road":
-#			roads_array.append(item["base"])
-#		else:
-#			for cell in get_atlas_positions_array_from_dims(item["dims"],item["base"]):
-#				var sourse_id = BUILDING_TYPE[item["type"].to_upper()] if item["connected"] else BUILDING_TYPE[item["type"].to_upper()] + 2
-#				$Buildings.set_cell(0, cell, sourse_id, cell - item["base"])
-#	$Buildings.set_cells_terrain_connect(0,roads_array,0,0,false)
 
-#func get_atlas_positions_array_from_dims(dims,base) -> Array:
-#	var result = []
-#	for y in dims.y:
-#		for x in dims.x:
-#			result.append(base + Vector2i(x,y))
-#	return result
+	update_ortho_map()
+
 
 func connect_dialog_buttons(dict,func_name):
 	dialog_mode = true
@@ -550,4 +734,9 @@ func _on_done_button_pressed() -> void:
 func _on_iso_ortho_button_toggled(button_pressed: bool) -> void:
 	$Ortho.visible = !button_pressed
 	$Iso.visible = button_pressed
-	$UI/HUD/IsoOrthoButton.text = "IsoMode" if button_pressed else "OrthoMode"
+	if $Ortho.visible:
+		_on_done_button_pressed()
+	$UI/HUD/Menu.visible = true if button_pressed else false
+	$UI/HUD/IsoOrthoButton.text = "to Ortho" if button_pressed else "to Iso"
+
+
