@@ -57,8 +57,8 @@ func _ready() -> void:
 		build_main_hall()
 	else:
 		load_from_buildings_data_file()
+		update_buildings_on_map()
 	update_map()
-	update_buildings_on_map()
 	update_ortho_map()
 #	print(buildings_data_array_ortho)
 	default_cursor = load("res://assets/ui/default_cursor_32.png")
@@ -76,9 +76,10 @@ func _process(_delta: float) -> void:
 	var current_cell = $Iso/IsoLand.local_to_map(get_global_mouse_position())
 #	print(current_cell)
 #	print(Globals.counter)
+#	print(place_valid)
 	Globals.is_cursor_on_occupied = false if Globals.counter == 0 else true
 #	print(idle_mode,build_mode,expanse_mode,move_mode)
-	if dialog_mode:
+	if dialog_mode or build_mode:
 		$UI/HUD/IsoOrthoButton.visible = false
 	else:
 		$UI/HUD/IsoOrthoButton.visible = true
@@ -107,10 +108,80 @@ func show_modes():
 	
 	$UI/HUD/DebugLabel.text = text
 
+func get_type_from_buildings_data_array(pos_ort):
+	for item in buildings_data_array_ortho:
+		for cell in utils.get_atlas_positions_array_from_dims(item["dims"],item["base"]):
+			if cell == pos_ort:
+				return item["type"]
+
+
+func erase_building(btn_name,dict):
+
+	if btn_name == "Yes":
+
+		var idx_to_del = 0
+		var iso_map_position_to_del: Vector2i
+		for idx in buildings_data_array.size():
+			if buildings_data_array[idx]["id"] == dict["id"]:
+				idx_to_del = idx
+				iso_map_position_to_del = buildings_data_array[idx]["base"]
+		print(iso_map_position_to_del)
+		buildings_data_array.remove_at(idx_to_del)
+		buildings_data_array_ortho.erase(dict)
+
+		if dict["type"] == "Road":
+			check_and_change_road_tree_after_place_or_erase(dict,false)
+			$Iso/IsoRoads.erase_cell(0,iso_map_position_to_del)
+		elif dict["type"] == "Main_Hall":
+			var mh_neighbors = get_neighbors_for_building(dict["base"],dict["dims"])
+			for mh_n in mh_neighbors:
+				if get_type_from_buildings_data_array(mh_n) == "Road":
+
+					var tree = get_road_tree(mh_n)
+					for road in tree:
+						var item = get_item_from_buildings_data_array_by_position(road)
+						item["connected"] = false
+
+					var buildings = collect_all_buildings_along_the_roadtree(tree)
+					for b in buildings:
+						b["connected"] = false
+
+		for cell in utils.get_atlas_positions_array_from_dims(dict["dims"],dict["base"]):
+			$Ortho/OrthoBuildings.erase_cell(0, cell)
+		for b in $Iso/BuildingS.get_children():
+			if $Iso/IsoLand.local_to_map(b.position) == iso_map_position_to_del:
+				b.queue_free()
+				break
+		file_manager.save_to_file("buildings_data", buildings_data_array)
+		update_ortho_map()
+		desactivate_dialog_btns()
+	elif btn_name == "No":
+		desactivate_dialog_btns()
+
 func _unhandled_input(event: InputEvent) -> void:
 	if Globals.play_mode:
 		if event.is_action_released("ui_accept"):
 			var current_cell = get_global_mouse_position()
+	
+	if sell_mode:
+		if event.is_action_released("ui_accept"):
+			var current_tile = $Iso/IsoLand.local_to_map(get_global_mouse_position())
+			if $Ortho/OrthoBuildings.get_cell_source_id(0, utils.trans_iso_to_ortho(current_tile)) == BUILDING_TYPE.MAIN_HALL:
+				print("You can`t!")
+			else:
+				if $Ortho/OrthoBuildings.get_used_cells(0).has(utils.trans_iso_to_ortho(current_tile)):
+					for item in buildings_data_array_ortho:
+						for cell in utils.get_atlas_positions_array_from_dims(item["dims"],item["base"]):
+							if utils.trans_iso_to_ortho(current_tile) == cell:
+								if !has_painted_building:
+									for b in buildings_data_array:
+										if utils.trans_iso_to_ortho(b["base"]) == item["base"]:
+											paint_building(b["base"],item["dims"],Color(1,0,0,0.25))
+									$UI/HUD/Dialog/VBoxContainer/Label.text = "Sell "+ item["type"]+"?"
+									$UI/HUD/Dialog.visible = true
+									$UI/HUD/Menu.visible = false
+									var callable = Callable(self,"erase_building")
+									connect_dialog_buttons(item,callable)
 	
 	if build_mode:
 		if event.is_action_released("ui_accept"):
@@ -118,6 +189,20 @@ func _unhandled_input(event: InputEvent) -> void:
 			if build_type != "Road":
 				cancel_build_mode()
 				$Iso/IsoBase.modulate = Color(1,1,1,1)
+			else:
+				$UI/HUD.mouse_filter = Control.MOUSE_FILTER_STOP
+				var pr = Label.new()
+				pr.text = "wait 1 sec"
+				var font = load("res://Roboto-Regular.ttf")
+				pr.add_theme_font_override("font",font)
+				pr.add_theme_font_size_override("font_size", 9)
+				pr.position = get_global_mouse_position()
+				add_child(pr)
+				await get_tree().create_timer(1).timeout
+				pr.queue_free()
+				$UI/HUD.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+
 		if event.is_action_released("ui_cancel"):
 			cancel_build_mode()
 			$Iso/IsoBase.modulate = Color(1,1,1,1)
@@ -168,6 +253,9 @@ func _unhandled_input(event: InputEvent) -> void:
 #	if event is InputEventMouseButton:
 #		half_camera_rect = get_viewport_rect().size * zoom_factor * 0.5
 #			if event.is_pressed():
+
+func _stop():
+	place_valid = true
 
 func get_build_dims():
 	match build_type:
@@ -349,36 +437,40 @@ func get_item_from_buildings_data_array_by_position(pos_ort):
 				return item
 
 func check_and_change_road_tree_after_place_or_erase(dict,bull):
-
+	# if place/erase connected road
 	if dict["type"] == "Road" and dict["connected"]:
 		for n in utils.get_neighbors_for_position(dict["base"]):
 			if get_type_from_buildings_data_array_ort(n) == "Road" and !is_road_connected_to_MH(n):
 				var tree = get_road_tree(n)
-				
 				# change roads
 				for road in tree:
 					var item = get_item_from_buildings_data_array_by_position(road)
+#					print(item)
 					item["connected"] = bull
+#					print(item)
 					# change item in iso_array
 					for i in buildings_data_array:
 						if i["id"] == item["id"]:
 							i["connected"] = bull
 #							print(i)
 				
-				# change buildings
+				# change buildings along the road_tree
 				var buildings = collect_all_buildings_along_the_roadtree(tree)
 				for item in buildings:
 					if bull:
 						item["connected"] = bull
 					else:
 						var neighbors = get_neighbors_for_building(item["base"],item["dims"])
-						item["connected"] = true if check_for_alt_roads(neighbors) else false
+#						print(neighbors)
+						
+						item["connected"] = check_for_alt_roads(neighbors) #else false
 					# change item in iso_array
 					for i in buildings_data_array:
 						if i["id"] == item["id"]:
-							i["connected"] = bull
+#							print(i)
+							i["connected"] = item["connected"]
 							for b in $Iso/BuildingS.get_children():
-								if Vector2i(b.position) == i["base"]:
+								if $Iso/IsoLand.local_to_map(b.position) == i["base"]:
 									b.queue_free()
 							if i["connected"]:
 								var building_instance = load("res://scenes/" + i["type"].to_lower() + ".tscn").instantiate()
@@ -395,9 +487,10 @@ func check_and_change_road_tree_after_place_or_erase(dict,bull):
 				item["connected"] = true if check_for_alt_roads(neighbors) else bull
 				for i in buildings_data_array:
 					if i["id"] == item["id"]:
-						i["connected"] = bull
+						i["connected"] = item["connected"]
 						for b in $Iso/BuildingS.get_children():
-							if Vector2i(b.position) == i["base"]:
+#							print( $Iso/IsoLand.local_to_map(b.position),i)
+							if $Iso/IsoLand.local_to_map(b.position) == i["base"]:
 								b.queue_free()
 						if i["connected"]:
 							var building_instance = load("res://scenes/" + i["type"].to_lower() + ".tscn").instantiate()
@@ -501,6 +594,7 @@ func build_main_hall():
 	}
 	$Iso/IsoRoads.set_cells_terrain_connect(0,[road_dict["base"]],0,0,false)
 	buildings_data_array.append(road_dict)
+	
 	var road_dict_ortho = {
 		"id": road_dict["id"],
 		"type": "Road",
@@ -511,10 +605,12 @@ func build_main_hall():
 		"last_coll": 0
 	}
 	$Ortho/OrthoBuildings.set_cells_terrain_connect(0,[road_dict_ortho["base"]],0,0,false)
-	buildings_data_array_ortho.append(mh_dict_ortho)
+	buildings_data_array_ortho.append(road_dict_ortho)
+	
 	file_manager.save_to_file("buildings_data",buildings_data_array)
 	file_manager.save_to_file("lands_data",own_lands_array)
 	file_manager.save_to_file("config","not_first_time")
+
 
 func load_from_buildings_data_file() :
 	var content: Array = file_manager.load_from_file("buildings_data") as Array
@@ -656,7 +752,7 @@ func manage_expanse(pos):
 #			GlobalSignal.pick_expansion.disconnect(Callable(self,"manage_expanse"))
 		$UI/HUD/Dialog/VBoxContainer/Label.text = "Buy Expansion?"
 		$UI/HUD/Dialog.visible = true
-		$UI/HUD/DoneButton.visible = false
+#		$UI/HUD/DoneButton.visible = false
 		var callable = Callable(self,"buy_expansion")
 		connect_dialog_buttons({"position": exp_pos},callable)
 
@@ -689,8 +785,8 @@ func desactivate_dialog_btns():
 		has_painted_building = false
 	
 	var c = null
-#	if sell_mode:
-#		c = Callable(self,"erase_building")
+	if sell_mode:
+		c = Callable(self,"erase_building")
 	if expanse_mode:
 		c = Callable(self,"buy_expansion")
 		
@@ -747,6 +843,7 @@ func update_buildings_on_map():
 
 func connect_dialog_buttons(dict,func_name):
 	dialog_mode = true
+	$UI/HUD/DoneButton.visible = false
 	for b in get_tree().get_nodes_in_group("dialog_buttons"):
 		if !b.pressed.is_connected(func_name):
 			b.pressed.connect(func_name.bind(b.name,dict))
