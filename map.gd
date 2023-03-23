@@ -79,7 +79,7 @@ func _process(_delta: float) -> void:
 #	print(place_valid)
 	Globals.is_cursor_on_occupied = false if Globals.counter == 0 else true
 #	print(idle_mode,build_mode,expanse_mode,move_mode)
-	if dialog_mode or build_mode:
+	if dialog_mode or build_mode or drag_mode:
 		$UI/HUD/IsoOrthoButton.visible = false
 	else:
 		$UI/HUD/IsoOrthoButton.visible = true
@@ -125,7 +125,7 @@ func erase_building(btn_name,dict):
 			if buildings_data_array[idx]["id"] == dict["id"]:
 				idx_to_del = idx
 				iso_map_position_to_del = buildings_data_array[idx]["base"]
-		print(iso_map_position_to_del)
+#		print(iso_map_position_to_del)
 		buildings_data_array.remove_at(idx_to_del)
 		buildings_data_array_ortho.erase(dict)
 
@@ -138,13 +138,30 @@ func erase_building(btn_name,dict):
 				if get_type_from_buildings_data_array(mh_n) == "Road":
 
 					var tree = get_road_tree(mh_n)
+#					print(tree)
+					# if road has more than 1 tile near MH -> we have same trees for every tile(need to optimize)
 					for road in tree:
 						var item = get_item_from_buildings_data_array_by_position(road)
+						# disconnect all pieces of road_trees
 						item["connected"] = false
+						for i in buildings_data_array:
+							if i["id"] == item["id"]:
+								i["connected"] = false
 
 					var buildings = collect_all_buildings_along_the_roadtree(tree)
+					# disconnect all buildings along the road_trees
 					for b in buildings:
 						b["connected"] = false
+						for i in buildings_data_array:
+							if i["id"] == b["id"]:
+								i["connected"] = false
+								for biso in $Iso/BuildingS.get_children():
+									if $Iso/IsoLand.local_to_map(biso.position) == i["base"]:
+										biso.queue_free()
+								var building_instance = load("res://scenes/" + i["type"].to_lower() + "_not.tscn").instantiate()
+								building_instance.position = $Iso/IsoLand.map_to_local(i["base"])
+								$Iso/BuildingS.add_child(building_instance)
+						
 
 		for cell in utils.get_atlas_positions_array_from_dims(dict["dims"],dict["base"]):
 			$Ortho/OrthoBuildings.erase_cell(0, cell)
@@ -165,14 +182,14 @@ func _unhandled_input(event: InputEvent) -> void:
 	
 	if sell_mode:
 		if event.is_action_released("ui_accept"):
-			var current_tile = $Iso/IsoLand.local_to_map(get_global_mouse_position())
-			if $Ortho/OrthoBuildings.get_cell_source_id(0, utils.trans_iso_to_ortho(current_tile)) == BUILDING_TYPE.MAIN_HALL:
+			var current_cell = $Iso/IsoLand.local_to_map(get_global_mouse_position())
+			if $Ortho/OrthoBuildings.get_cell_source_id(0, utils.trans_iso_to_ortho(current_cell)) == BUILDING_TYPE.MAIN_HALL:
 				print("You can`t!")
 			else:
-				if $Ortho/OrthoBuildings.get_used_cells(0).has(utils.trans_iso_to_ortho(current_tile)):
+				if $Ortho/OrthoBuildings.get_used_cells(0).has(utils.trans_iso_to_ortho(current_cell)):
 					for item in buildings_data_array_ortho:
 						for cell in utils.get_atlas_positions_array_from_dims(item["dims"],item["base"]):
-							if utils.trans_iso_to_ortho(current_tile) == cell:
+							if utils.trans_iso_to_ortho(current_cell) == cell:
 								if !has_painted_building:
 									for b in buildings_data_array:
 										if utils.trans_iso_to_ortho(b["base"]) == item["base"]:
@@ -215,19 +232,23 @@ func _unhandled_input(event: InputEvent) -> void:
 			has_lands_preview = true
 		if event.is_action_released("ui_accept"):
 			var current_cell = $Iso/IsoLand.local_to_map(get_global_mouse_position())
-			print("move",current_cell)
-			if $Iso/IsoRoads.get_used_cells(0).has(current_cell):
-				pass
-#				for item in buildings_data_array:
-#					for pos in get_atlas_positions_array_from_dims(item["dims"],item["base"]):
-#						if current_cell == pos:
-#							erase_building("Yes",item)
-#							$UI.set_building_preview(item["type"], get_global_mouse_position())
-#							build_type = item["type"]
-#							drag_mode = true
-#
-#			elif has_point_in_for_sale_lands(current_cell):
-#				expanse_mode = true
+			if $Ortho/OrthoBuildings.get_used_cells(0).has(utils.trans_iso_to_ortho(current_cell)):
+				for item in buildings_data_array_ortho:
+					for cell in utils.get_atlas_positions_array_from_dims(item["dims"],item["base"]):
+						if utils.trans_iso_to_ortho(current_cell) == cell:
+							erase_building("Yes",item)
+							set_building_preview(item["type"],get_global_mouse_position())
+							build_type = item["type"]
+							drag_mode = true
+
+	
+	if drag_mode:
+		$UI/HUD/DoneButton.visible = false
+		move_mode = false
+		if place_valid:
+			if event.is_action_released("ui_accept"):
+				place_building()
+				cancel_drag_mode()
 	
 	if expanse_mode: # ???
 		pass
@@ -254,8 +275,14 @@ func _unhandled_input(event: InputEvent) -> void:
 #		half_camera_rect = get_viewport_rect().size * zoom_factor * 0.5
 #			if event.is_pressed():
 
-func _stop():
-	place_valid = true
+
+func cancel_drag_mode():
+	place_valid = false
+	drag_mode = false
+	move_mode = true
+#	$Cells.visible = true
+	$UI/HUD/DoneButton.visible = true
+	get_node("Iso/BP/BuildingPreview").queue_free()
 
 func get_build_dims():
 	match build_type:
@@ -397,6 +424,7 @@ func place_building():
 			for mh_n in mh_neighbors:
 				if get_type_from_buildings_data_array_ort(mh_n) == "Road":
 					var tree = get_road_tree(mh_n)
+					# connect all roads in trees
 					for road in tree:
 						var item = get_item_from_buildings_data_array_by_position(road)
 						item["connected"] = true
@@ -404,11 +432,18 @@ func place_building():
 							if i["id"] == item["id"]:
 								i["connected"] = true
 					var buildings = collect_all_buildings_along_the_roadtree(tree)
+					# connect all buildings along the road_trees
 					for b in buildings:
 						b["connected"] = true
 						for i in buildings_data_array:
 							if i["id"] == b["id"]:
 								i["connected"] = true
+								for biso in $Iso/BuildingS.get_children():
+									if $Iso/IsoLand.local_to_map(biso.position) == i["base"]:
+										biso.queue_free()
+								var building_instance = load("res://scenes/" + i["type"].to_lower() + ".tscn").instantiate()
+								building_instance.position = $Iso/IsoLand.map_to_local(i["base"])
+								$Iso/BuildingS.add_child(building_instance)
 		
 		buildings_data_array.append(dict)
 		buildings_data_array_ortho.append(dict_ortho)
